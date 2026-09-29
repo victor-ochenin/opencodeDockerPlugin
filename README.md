@@ -2,7 +2,7 @@
 
 A Docker container panel for the OpenCode 2 TUI sidebar.
 
-The panel appends itself to `sidebar.content` and polls `docker ps --all --format "{{json .}}"`. It is read-only: it shows what is running, which ports are published, and how long a container has been up. It never starts, stops or execs anything.
+The panel appends itself to the `sidebar.content` slot and polls `docker ps --all --format "{{json .}}"`. It is read-only: it shows what is running, which ports are published, and how long a container has been up. It never starts, stops or execs anything.
 
 Русская версия этого файла: [README.ru.md](README.ru.md)
 
@@ -37,8 +37,7 @@ A missing or stopped Docker is a normal state, not a plugin failure, so it is re
 ## Layout
 
 ```text
-index.ts      server entrypoint, plugin id and setup
-tui.ts        CLI entrypoint, registers the sidebar slot
+tui.tsx       CLI entrypoint: default export, registers the sidebar slot
 panel.tsx     Solid component: header, rows, states
 docker.ts     runs docker ps, parses and sorts the output
 types.ts      container and state types
@@ -46,26 +45,26 @@ scripts/      parser check
 fixtures/     captured docker ps output used by the check
 ```
 
+There is deliberately no server entrypoint. The plugin is CLI-only, so OpenCode never asks the server to load it, and no `@opencode/plugin` import has to resolve. The entrypoint exports a plain object with `id` and `setup`; the host passes the plugin context in and the panel reads `context.theme` from it. This is the same shape the herdr integration uses.
+
 ## Install
 
-The discovery layout expects `index.ts` and `tui.ts` inside a plugin folder in the OpenCode config directory:
+Copy the files into the OpenCode config directory:
 
 ```text
 ~/.config/opencode/plugins/docker-panel/
 ```
 
-On Windows the config directory is `%USERPROFILE%\.config\opencode\plugins\docker-panel\`.
-
-Copy the files from a checkout:
+On Windows that is `%USERPROFILE%\.config\opencode\plugins\docker-panel\`.
 
 ```powershell
-$src = "$HOME\Desktop\Projects\Test\opencodeDockerPlugin"
+$src = "path\to\opencodeDockerPlugin"
 $dst = "$HOME\.config\opencode\plugins\docker-panel"
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 Copy-Item "$src\*.ts","$src\*.tsx","$src\package.json" -Destination $dst -Force
 ```
 
-Plugins under the config directory are discovered automatically, so no config edit is required. To pass options, register the folder in `cli.json`:
+Register it in `cli.json`, otherwise the CLI has no entry to load:
 
 ```jsonc
 {
@@ -74,7 +73,7 @@ Plugins under the config directory are discovered automatically, so no config ed
 }
 ```
 
-Restart the TUI after copying or editing files.
+Restart the TUI afterwards.
 
 ## Options
 
@@ -94,18 +93,18 @@ fixture: 3 containers -> chroma:running, postgres:running, worker-old:exited
 live: kind=ok detail=- containers=2
 ```
 
-The check asserts ordering, port splitting, name normalisation, truncation input and tolerance to broken lines against the fixture, then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for the fixture part.
+The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for the fixture part.
 
 Type checking:
 
 ```sh
 npm install
-npx tsc --noEmit
+npm run typecheck
 ```
 
 ## Known limits
 
-- OpenCode 2 is in beta, so slot names and the theme token shape may change. Colors are resolved defensively with fallbacks for that reason, and the header can be pinned to literal tokens once the shape is confirmed.
+- OpenCode 2 is in beta, so the slot name and the theme token shape may change. Colors are resolved defensively with fallbacks for that reason, and the header can be pinned to literal tokens once the shape is confirmed.
 - The poll spawns `docker ps` on an interval. On a host with hundreds of containers, raise `intervalMs` to 5000 or higher.
 - No log tail, no exec, no start or stop, no compose grouping, no restart history. Those are separate features and each one is deliberately out of scope here.
 

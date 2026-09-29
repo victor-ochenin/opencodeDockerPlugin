@@ -1,5 +1,4 @@
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js"
-import { usePlugin } from "@opencode/plugin/tui"
 
 import { runDockerPs } from "./docker.ts"
 import type { Container, DockerState } from "./types.ts"
@@ -26,12 +25,12 @@ function detailLabel(container: Container): string {
   return container.status || container.image
 }
 
-export function DockerPanel(props: { intervalMs: number }) {
-  const context = usePlugin()
+export function DockerPanel(props: { intervalMs: number; theme: unknown }) {
   const [state, setState] = createSignal<DockerState>(INITIAL)
   const [known, setKnown] = createSignal<Container[]>([])
   const [open, setOpen] = createSignal(true)
 
+  const theme = () => props.theme
   const rows = createMemo(() => (state().containers.length > 0 ? state().containers : known()))
   const isStale = createMemo(() => state().kind === "stale" && known().length > 0)
 
@@ -58,40 +57,40 @@ export function DockerPanel(props: { intervalMs: number }) {
   return (
     <box>
       <box flexDirection="row" gap={1} onMouseDown={() => setOpen((value) => !value)}>
-        <text fg={token(context.theme, "text.base", "white")}>
+        <text fg={token(theme(), "text.base", "white")}>
           <b>Docker</b>
           <Show when={rows().length > 0}>
-            <span style={{ fg: token(context.theme, "text.muted", "gray") }}> ({rows().length})</span>
+            <span style={{ fg: token(theme(), "text.muted", "gray") }}> ({rows().length})</span>
           </Show>
         </text>
         <Show when={isStale()}>
-          <span style={{ fg: token(context.theme, "warning", "yellow") }}>stale</span>
+          <span style={{ fg: token(theme(), "warning", "yellow") }}>stale</span>
         </Show>
       </box>
 
       <Show when={state().kind === "unavailable"}>
-        <text fg={token(context.theme, "text.muted", "gray")}> {state().detail}</text>
+        <text fg={token(theme(), "text.muted", "gray")}> {state().detail}</text>
       </Show>
       <Show when={state().kind === "ok" && rows().length === 0}>
-        <text fg={token(context.theme, "text.muted", "gray")}> no containers</text>
+        <text fg={token(theme(), "text.muted", "gray")}> no containers</text>
       </Show>
 
       <Show when={rows().length > 0 && open()}>
         <For each={rows().slice(0, MAX_ROWS)}>
           {(container) => (
             <box flexDirection="row" gap={1}>
-              <text flexShrink={0} fg={stateColor(context.theme, container.state)}>
+              <text flexShrink={0} fg={stateColor(theme(), container.state)}>
                 •
               </text>
-              <text fg={token(context.theme, "text.base", "white")} wrapMode="word">
+              <text fg={token(theme(), "text.base", "white")} wrapMode="word">
                 {container.name}{" "}
-                <span style={{ fg: token(context.theme, "text.muted", "gray") }}>{detailLabel(container)}</span>
+                <span style={{ fg: token(theme(), "text.muted", "gray") }}>{detailLabel(container)}</span>
               </text>
             </box>
           )}
         </For>
         <Show when={rows().length > MAX_ROWS}>
-          <text fg={token(context.theme, "text.muted", "gray")}> {rows().length - MAX_ROWS} more</text>
+          <text fg={token(theme(), "text.muted", "gray")}> {rows().length - MAX_ROWS} more</text>
         </Show>
       </Show>
     </box>
