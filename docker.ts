@@ -4,10 +4,10 @@ import type { Container, DockerState } from "./types.ts"
 
 const COMMAND = "docker"
 const ARGS = ["ps", "--all", "--format", "{{json .}}"]
-const TIMEOUT_MS = 2000
+const TIMEOUT_MS = 4000
 const MAX_BUFFER = 4 * 1024 * 1024
 
-function shortReason(raw: string): string {
+export function shortReason(raw: string): string {
   const text = raw.toLowerCase()
   if (text.includes("dockerdesktoplinuxengine") || text.includes("cannot find the file specified")) {
     return "docker desktop not running"
@@ -27,19 +27,16 @@ function toContainer(raw: Record<string, unknown>): Container | null {
     .replace(/^\//, "")
     .trim()
   if (!name) return null
-  const state = String(raw.State ?? "unknown")
   return {
-    id: String(raw.ID ?? ""),
     name,
     image: String(raw.Image ?? ""),
-    state,
+    state: String(raw.State ?? "unknown"),
     status: String(raw.Status ?? ""),
     ports: String(raw.Ports ?? "")
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean),
     createdAt: Number(raw.CreatedAt ?? 0) || 0,
-    running: state === "running",
   }
 }
 
@@ -59,7 +56,9 @@ export function parseDockerPs(stdout: string): Container[] {
     if (container) containers.push(container)
   }
   containers.sort((a, b) => {
-    if (a.running !== b.running) return a.running ? -1 : 1
+    const aRunning = a.state === "running"
+    const bRunning = b.state === "running"
+    if (aRunning !== bRunning) return aRunning ? -1 : 1
     if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt
     return a.name.localeCompare(b.name)
   })
@@ -67,35 +66,27 @@ export function parseDockerPs(stdout: string): Container[] {
 }
 
 export function runDockerPs(timeoutMs: number = TIMEOUT_MS): Promise<DockerState> {
-  const now = () => Date.now()
   return new Promise((resolve) => {
-    execFile(
-      COMMAND,
-      ARGS,
-      { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER },
-      (error, stdout, stderr) => {
-        if (!error) {
-          const containers = parseDockerPs(String(stdout))
-          resolve({
-            kind: containers.length > 0 ? "ok" : "empty",
-            containers,
-            detail: containers.length > 0 ? "" : "no containers",
-            at: now(),
-          })
-          return
-        }
-        const code = (error as NodeJS.ErrnoException).code
-        if (code === "ETIMEDOUT" || (error as { killed?: boolean }).killed === true) {
-          resolve({ kind: "stale", containers: [], detail: "docker did not respond", at: now() })
-          return
-        }
+    execFile(COMMAND, ARGS, { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER }, (error, stdout, stderr) => {
+      if (!error) {
+        const containers = parseDockerPs(String(stdout))
         resolve({
-          kind: "unavailable",
-          containers: [],
-          detail: code === "ENOENT" ? "docker not installed" : shortReason(String(stderr ?? error.message ?? "")),
-          at: now(),
+          kind: containers.length > 0 ? "ok" : "empty",
+          containers,
+          detail: containers.length > 0 ? "" : "no containers",
         })
-      },
-    )
+        return
+      }
+      const failure = error as { code?: string; killed?: boolean }
+      if (failure.code === "ETIMEDOUT" || failure.killed === true) {
+        resolve({ kind: "stale", containers: [], detail: "docker did not respond" })
+        return
+      }
+      resolve({
+        kind: "unavailable",
+        containers: [],
+        detail: failure.code === "ENOENT" ? "docker not installed" : shortReason(String(stderr || error.message)),
+      })
+    })
   })
 }
