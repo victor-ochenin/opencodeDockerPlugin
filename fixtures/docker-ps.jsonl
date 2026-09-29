@@ -1,0 +1,3 @@
+{"ID":"c1","Names":"/postgres","Image":"postgres:16","State":"running","Status":"Up 3 hours","Ports":"0.0.0.0:5432->5432/tcp","CreatedAt":"1758000000"}
+{"ID":"c2","Names":"/chroma","Image":"chromadb/chroma","State":"running","Status":"Up 40 minutes","Ports":"127.0.0.1:8000, 127.0.0.1:8001","CreatedAt":"1758005000"}
+{"ID":"c3","Names":"/worker-old","Image":"worker:1.2","State":"exited","Status":"Exited (0) 2 days ago","Ports":"","CreatedAt":"1757900000"}
