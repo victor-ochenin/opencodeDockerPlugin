@@ -34,7 +34,7 @@ export function availableActions(container: Container): ContainerAction[] {
     case "created":
     case "exited":
     case "dead":
-      return ["start"]
+      return ["start", ...down]
     default:
       return []
   }

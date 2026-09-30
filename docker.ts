@@ -39,6 +39,15 @@ function composeLabels(raw: string): Pick<Container, "composeProject" | "compose
   return { composeProject, composeService }
 }
 
+/** docker reports CreatedAt either as a unix timestamp in seconds or as a date with a trailing zone name, which Date.parse rejects. */
+function parseCreatedAt(raw: unknown): number {
+  const text = String(raw ?? "").trim()
+  if (!text) return 0
+  if (/^\d+$/.test(text)) return Number(text) * 1000
+  const parsed = Date.parse(text.replace(/\s+[A-Za-z]{2,5}$/, ""))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 function toContainer(raw: Record<string, unknown>): Container | null {
   const name = String(raw.Names ?? "")
     .replace(/^\//, "")
@@ -54,7 +63,7 @@ function toContainer(raw: Record<string, unknown>): Container | null {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean),
-    createdAt: Number(raw.CreatedAt ?? 0) || 0,
+    createdAt: parseCreatedAt(raw.CreatedAt),
     ...compose,
   }
 }

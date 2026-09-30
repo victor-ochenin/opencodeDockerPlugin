@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 
 import { parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
 import { availableActions, buildArgs } from "../commands.ts"
+import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { keepContainers } from "../poll.ts"
 import type { Container, DockerState } from "../types.ts"
 
@@ -38,6 +39,17 @@ assert.equal(compose.composeProject, "socnot", "compose project read from labels
 assert.equal(compose.composeService, "web", "compose service read from labels")
 assert.equal((parseDockerPs('{"Names":"/solo","State":"running"}')[0] as Container).composeProject, undefined)
 
+const CREATED_SECONDS = 1757900000
+const CREATED_AS_DOCKER_DATE = `${new Date(CREATED_SECONDS * 1000).toISOString().slice(0, 19).replace("T", " ")} +0000 UTC`
+const dated = parseDockerPs(`{"Names":"/d","State":"exited","CreatedAt":${JSON.stringify(CREATED_AS_DOCKER_DATE)}}`)[0] as Container
+const stamped = parseDockerPs(`{"Names":"/s","State":"exited","CreatedAt":"${CREATED_SECONDS}"}`)[0] as Container
+assert.equal(dated.createdAt, CREATED_SECONDS * 1000, "a date with a trailing zone name parses to milliseconds")
+assert.equal(stamped.createdAt, CREATED_SECONDS * 1000, "a unix timestamp in seconds is scaled to milliseconds")
+assert.ok(
+  parseDockerPs('{"Names":"/a","State":"exited","CreatedAt":"garbage"}')[0]!.createdAt === 0,
+  "an unreadable CreatedAt falls back to zero instead of NaN",
+)
+
 const bare: Container = { name: "lonely", image: "img", state: "running", status: "Up 2 hours", ports: [], createdAt: 0 }
 assert.deepEqual(buildArgs("stop", bare), ["stop", "--", "lonely"], "name is passed after the flag separator")
 assert.deepEqual(buildArgs("restart", compose), ["restart", "--", "web"])
@@ -47,9 +59,60 @@ assert.throws(() => buildArgs("down", bare), /no compose project/, "down is refu
 
 assert.deepEqual(availableActions(compose), ["restart", "stop", "down"], "destructive action goes last")
 assert.deepEqual(availableActions(bare), ["restart", "stop"], "no down without a compose project")
-assert.deepEqual(availableActions({ ...bare, state: "exited" }), ["start"], "a stopped container can only be started")
+assert.deepEqual(availableActions({ ...bare, state: "exited" }), ["start"], "a bare stopped container can only be started")
+assert.deepEqual(
+  availableActions({ ...compose, state: "exited" }),
+  ["start", "down"],
+  "a stopped compose container can be torn down, which is when cleanup is wanted",
+)
 assert.deepEqual(availableActions({ ...bare, state: "dead" }), ["start"], "a dead container can only be started")
 assert.deepEqual(availableActions({ ...bare, state: "removing" }), [], "an unknown state offers nothing")
+
+const ansi = "\u001b[31mred\u001b[0m plain \u001b[1mbold\u001b[0m"
+assert.deepEqual(sanitize(ansi), ["red plain bold"], "ANSI sequences are stripped")
+assert.deepEqual(sanitize("a\r\nb\rc"), ["a", "b", "c"], "a lone CR terminates a line instead of rewriting it")
+const parsedLogs = parseLogLines(
+  [
+    "2026-09-21T09:56:17.123456789Z starting server",
+    "2026-09-21T09:56:18.000000000Z WARNING disk almost full",
+    "2026-09-21T09:56:19.000000000Z ERROR connection refused",
+  ].join("\n"),
+)
+assert.equal(parsedLogs.length, 3)
+assert.equal(parsedLogs[0]?.time, "2026-09-21T09:56:17.123456789Z", "the timestamp is split off the line")
+assert.equal(parsedLogs[0]?.text, "starting server")
+assert.deepEqual(
+  parsedLogs.map((item) => item.level),
+  ["info", "warn", "error"],
+  "levels are classified from the message text",
+)
+assert.deepEqual(
+  parseLogLines("2026-09-21T09:56:17.000000000Z\n2026-09-21T09:56:18.000000000Z real text").map((item) => item.text),
+  ["real text"],
+  "a line that is only a timestamp is an empty log line and is dropped",
+)
+assert.deepEqual(
+  parseLogLines("plain line without a timestamp").map((item) => item.text),
+  ["plain line without a timestamp"],
+  "a line without a timestamp is kept whole",
+)
+assert.deepEqual(
+  mergeLogLines([
+    "2026-09-21T09:56:19.000000000Z from stderr\n2026-09-21T09:56:21.000000000Z also stderr",
+    "2026-09-21T09:56:17.000000000Z from stdout\n2026-09-21T09:56:20.000000000Z also stdout",
+  ]).map((item) => item.text),
+  ["from stdout", "from stderr", "also stdout", "also stderr"],
+  "interleaved streams are merged back into timestamp order",
+)
+assert.deepEqual(
+  mergeLogLines(["no timestamp here\n2026-09-21T09:56:17.000000000Z dated"]).map((item) => item.text),
+  ["dated", "no timestamp here"],
+  "an untimed line sorts last instead of scrambling the order",
+)
+
+const liveLogs = await runDockerLogs(parsed[0]!.name)
+assert.ok(Array.isArray(liveLogs.lines), "a live log call resolves to lines")
+assert.ok(liveLogs.error === undefined || liveLogs.error.length > 0, "a live log call reports why on failure")
 
 const previous = parsed
 const ok: DockerState = { kind: "empty", containers: [], detail: "no containers" }

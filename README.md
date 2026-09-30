@@ -33,6 +33,12 @@ Docker (3)                                              <- click to collapse
 
 The result of every action arrives as a toast, and the panel refreshes immediately instead of waiting for the next poll. While a command runs the header shows `working` and further clicks are ignored, so a double click cannot launch two commands.
 
+## Logs
+
+`Logs` in the same menu replaces the dialog contents with a log view for that container, so the log and the actions share one window. It closes with `esc` or by clicking the footer line.
+
+The view is `docker logs --timestamps --tail 200 -- <name>`, refreshed every two seconds while it is open. Docker interleaves the container's two streams, so the two buffers are parsed separately and merged back by timestamp; without that the log reads all of stdout first. ANSI sequences and lone `CR` are stripped, because the terminal would otherwise run them as control codes. A fixed window of fifteen lines is scrolled with the mouse wheel.
+
 ## What it shows
 
 ```text
@@ -68,6 +74,7 @@ tui.tsx       CLI entrypoint: registers the sidebar slot
 panel.tsx     Solid component: header, rows, states, action dialog
 poll.ts       polling loop: owns the last known rows and the refresh timer
 commands.ts   builds and runs the lifecycle commands
+logs.ts       reads, sanitises and orders container log lines
 docker.ts     runs docker ps, parses and sorts the output
 types.ts      container and state types
 scripts/      parser and command checks
@@ -140,9 +147,10 @@ Type checking is also how the plugin is validated against the host: `@opencode/p
 ## Known limits
 
 - OpenCode 2 is in beta, so slot names and theme tokens may change; that surfaces as a type error rather than a runtime surprise.
+- The host does not repaint a slot when only a reactive value changes, so the panel is remounted through a fresh slot claim whenever the container list really changes, at most once every ten seconds. That is a workaround, and it resets the collapsed state and closes an open log view; the underlying repaint gap belongs to the host.
 - The poll spawns `docker ps` on an interval. On a host with hundreds of containers, raise `intervalMs` to 5000 or higher.
 - Rows are capped at ten with an `N more` line and there is no scrolling, which suits a sidebar but not a real container list.
-- No log tail, no exec, no volume or image actions, no restart history. `Down` is offered per container but acts on the whole compose project.
+- No exec, no volume or image actions, no restart history. `Down` is offered per container but acts on the whole compose project. The log view is a fixed window over the last 200 lines with no history beyond that.
 - Actions are mouse-only; the plugin registers no keymap layer.
 
 ## License

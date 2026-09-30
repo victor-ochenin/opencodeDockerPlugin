@@ -1,17 +1,32 @@
-import { For, Show, createSignal } from "solid-js"
+import { Index, Show, createSignal, onCleanup } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
 import { ACTION_LABEL, availableActions, buildArgs, runContainerCommand, type CommandResult } from "./commands.ts"
+import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
 import { createDockerPolling } from "./poll.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
 const MAX_ROWS = 10
+const LOG_VIEW_LINES = 15
+const LOG_REFRESH_MS = 2000
+
+type MenuChoice = ContainerAction | "logs"
+
+interface ScrollEvent {
+  readonly scroll?: { readonly direction: string; readonly delta: number }
+}
 
 function dotColor(theme: ResolvedTheme, state: string) {
   if (state === "running") return theme.text.feedback.success.base
   if (state === "paused" || state === "restarting") return theme.text.feedback.warning.base
   if (state === "dead") return theme.text.feedback.error.base
+  return theme.text.muted
+}
+
+function levelColor(theme: ResolvedTheme, level: LogLevel) {
+  if (level === "error") return theme.text.feedback.error.base
+  if (level === "warn") return theme.text.feedback.warning.base
   return theme.text.muted
 }
 
@@ -24,11 +39,121 @@ function hasStaleRows(state: { kind: string; containers: Container[] }): boolean
   return (state.kind === "unavailable" || state.kind === "stale") && state.containers.length > 0
 }
 
-export function DockerPanel(props: { intervalMs: number; theme: ResolvedTheme; ui: Plugin.Context["ui"] }) {
-  const polling = createDockerPolling(props.intervalMs)
+/** A fixed viewport is the only way to keep the height predictable: opentui has no scrollable container. */
+function LogsView(props: {
+  name: string
+  result: LogResult | null
+  theme: ResolvedTheme
+  offset: number
+  onScroll: (event: ScrollEvent) => void
+  onClose: () => void
+}) {
+  const lines = () => props.result?.lines ?? []
+  const end = () => Math.max(0, lines().length - props.offset)
+  const window = () => lines().slice(Math.max(0, end() - LOG_VIEW_LINES), end())
+
+  return (
+    <box flexDirection="column">
+      <text fg={props.theme.text.muted}> docker logs --tail 200 -- {props.name} </text>
+      <Show when={props.result?.error}>
+        <text fg={props.theme.text.feedback.error.base}> {props.result?.error ?? ""}</text>
+      </Show>
+      <Show when={props.result && !props.result.error && lines().length === 0}>
+        <text fg={props.theme.text.muted}> no output</text>
+      </Show>
+      <Show when={!props.result}>
+        <text fg={props.theme.text.muted}> reading logs</text>
+      </Show>
+      <box
+        flexDirection="column"
+        onMouseScroll={(event) => {
+          event.stopPropagation()
+          props.onScroll(event)
+        }}
+      >
+        <Index each={window()}>
+          {(line) => (
+            <text fg={props.theme.text.base}>
+              <span style={{ fg: props.theme.text.muted }}>{line().time.slice(11, 19)} </span>
+              <span style={{ fg: levelColor(props.theme, line().level) }}>{line().text}</span>
+            </text>
+          )}
+        </Index>
+      </box>
+      <text
+        fg={props.theme.text.muted}
+        onMouseUp={(event) => {
+          event.stopPropagation()
+          props.onClose()
+        }}
+      >
+        {" "}
+        {lines().length} lines{end() < lines().length ? `, at ${end()}` : ""} · wheel scrolls · esc or click to close
+      </text>
+    </box>
+  )
+}
+
+export function DockerPanel(props: {
+  intervalMs: number
+  theme: ResolvedTheme
+  ui: Plugin.Context["ui"]
+  reload: () => void
+}) {
+  const polling = createDockerPolling(props.intervalMs, props.reload)
   const [open, setOpen] = createSignal(true)
   const [busy, setBusy] = createSignal(false)
+  const [logs, setLogs] = createSignal<{ name: string; result: LogResult | null } | null>(null)
+  const [offset, setOffset] = createSignal(0)
   const theme = () => props.theme
+  let logTimer: ReturnType<typeof setInterval> | undefined
+
+  const stopLogs = () => {
+    if (logTimer) clearInterval(logTimer)
+    logTimer = undefined
+    setLogs(null)
+    setOffset(0)
+  }
+
+  const loadLogs = async (name: string) => {
+    const result = await runDockerLogs(name)
+    if (logs()?.name !== name) return
+    setLogs({ name, result })
+  }
+
+  const scrollLogs = (event: ScrollEvent) => {
+    const scroll = event.scroll
+    if (!scroll || (scroll.direction !== "up" && scroll.direction !== "down")) return
+    const total = logs()?.result?.lines.length ?? 0
+    const max = Math.max(0, total - LOG_VIEW_LINES)
+    const step = Math.max(1, scroll.delta)
+    setOffset((current) => Math.min(max, Math.max(0, current + (scroll.direction === "up" ? step : -step))))
+  }
+
+  const openLogs = (container: Container) => {
+    if (logTimer) clearInterval(logTimer)
+    setOffset(0)
+    setLogs({ name: container.name, result: null })
+    void loadLogs(container.name)
+    logTimer = setInterval(() => void loadLogs(container.name), LOG_REFRESH_MS)
+    const view = () => (
+      <LogsView
+        name={container.name}
+        result={logs()?.result ?? null}
+        theme={props.theme}
+        offset={offset()}
+        onScroll={scrollLogs}
+        onClose={() => props.ui.dialog.clear()}
+      />
+    )
+    props.ui.dialog.show(view, stopLogs)
+    props.ui.dialog.set({ size: "large", centered: true })
+  }
+
+  onCleanup(() => {
+    if (logTimer) clearInterval(logTimer)
+    if (logs()) props.ui.dialog.clear()
+  })
 
   const report = (container: Container, action: ContainerAction, result: CommandResult) => {
     props.ui.toast.show({
@@ -44,34 +169,62 @@ export function DockerPanel(props: { intervalMs: number; theme: ResolvedTheme; u
     const result = await runContainerCommand(action, container)
     setBusy(false)
     report(container, action, result)
-    void polling.refresh()
+    await polling.refreshAfterAction()
   }
 
   const openMenu = async (container: Container) => {
     if (busy()) return
     const actions = availableActions(container)
     if (actions.length === 0) return
-    const action = await props.ui.dialog.select<ContainerAction>({
-      title: container.name,
-      placeholder: "Action",
-      options: actions.map((item) => ({
-        title: ACTION_LABEL[item],
-        value: item,
-        description: item === "down" ? `stops every container of ${container.composeProject}` : container.status,
-        footer: buildArgs(item, container).join(" "),
-      })),
-    })
-    if (!action) return
-    if (action === "down") {
-      const project = container.composeProject
-      const confirmed = await props.ui.dialog.confirm({
-        title: `Down ${project}?`,
-        message: "Removes this project's containers and networks. Volumes are kept. Not reversible from the panel.",
-        label: { confirm: "Down", cancel: "Cancel" },
+    try {
+      const choice = await props.ui.dialog.select<MenuChoice>({
+        title: container.name,
+        placeholder: "Action",
+        options: [
+          ...actions.map((item) => ({
+            title: ACTION_LABEL[item],
+            value: item as MenuChoice,
+            description: item === "down" ? `stops every container of ${container.composeProject}` : container.status,
+            footer: buildArgs(item, container).join(" "),
+          })),
+          {
+            title: "Logs",
+            value: "logs" as MenuChoice,
+            description: "read the last 200 log lines in the sidebar",
+            footer: `docker logs --tail 200 -- ${container.name}`,
+          },
+        ],
       })
-      if (!confirmed) return
+      if (!choice) return
+      if (choice === "logs") {
+        openLogs(container)
+        return
+      }
+      if (choice === "down") {
+        const project = container.composeProject
+        const confirmed = await props.ui.dialog.confirm({
+          title: `Down ${project}?`,
+          message: "Removes this project's containers and networks. Volumes are kept. Not reversible from the panel.",
+          label: { confirm: "Down", cancel: "Cancel" },
+        })
+        if (!confirmed) return
+      }
+      await run(choice, container)
+    } catch (error) {
+      props.ui.toast.show({
+        title: container.name,
+        message: `action failed: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "error",
+      })
     }
-    await run(action, container)
+  }
+
+  // A click in opentui is a mousedown plus a mouseup, and the host dismisses an overlay from the
+  // next mouse event it sees. The menu is therefore armed on the release, and only mounted after
+  // that release has finished propagating, so the release cannot land on its own backdrop.
+  const armMenu = (container: Container, event: { stopPropagation: () => void }) => {
+    event.stopPropagation()
+    setTimeout(() => void openMenu(container), 0)
   }
 
   return (
@@ -84,10 +237,10 @@ export function DockerPanel(props: { intervalMs: number; theme: ResolvedTheme; u
           </Show>
         </text>
         <Show when={hasStaleRows(polling.state())}>
-          <span style={{ fg: theme().text.feedback.warning.base }}>stale</span>
+          <text fg={theme().text.feedback.warning.base}> stale</text>
         </Show>
         <Show when={busy()}>
-          <span style={{ fg: theme().text.muted }}>working</span>
+          <text fg={theme().text.muted}> working</text>
         </Show>
       </box>
 
@@ -96,19 +249,19 @@ export function DockerPanel(props: { intervalMs: number; theme: ResolvedTheme; u
       </Show>
 
       <Show when={polling.state().containers.length > 0 && open()}>
-        <For each={polling.state().containers.slice(0, MAX_ROWS)}>
+        <Index each={polling.state().containers.slice(0, MAX_ROWS)}>
           {(container) => (
-            <box flexDirection="row" gap={1} onMouseDown={() => void openMenu(container)}>
-              <text flexShrink={0} fg={dotColor(theme(), container.state)}>
+            <box flexDirection="row" gap={1} onMouseUp={(event) => armMenu(container(), event)}>
+              <text flexShrink={0} fg={dotColor(theme(), container().state)}>
                 •
               </text>
               <text fg={theme().text.base} wrapMode="word">
-                {container.name}{" "}
-                <span style={{ fg: theme().text.muted }}>{detailLabel(container)}</span>
+                {container().name}{" "}
+                <span style={{ fg: theme().text.muted }}>{detailLabel(container())}</span>
               </text>
             </box>
           )}
-        </For>
+        </Index>
         <Show when={polling.state().containers.length > MAX_ROWS}>
           <text fg={theme().text.muted}> {polling.state().containers.length - MAX_ROWS} more</text>
         </Show>
