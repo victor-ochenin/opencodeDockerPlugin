@@ -1,6 +1,6 @@
 {
   "name": "opencode-docker-panel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Docker container panel for the OpenCode 2 TUI sidebar",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@opencode/plugin": "^2.0.20",
+    "@opencode/theme": "^2.0.20",
     "@opentui/core": "0.5.12",
     "@opentui/solid": "0.5.12",
     "solid-js": "1.9.12",

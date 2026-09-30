@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
 import { parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
+import { availableActions, buildArgs } from "../commands.ts"
 import { keepContainers } from "../poll.ts"
-import type { DockerState } from "../types.ts"
+import type { Container, DockerState } from "../types.ts"
 
 const fixturePath = fileURLToPath(new URL("../fixtures/docker-ps.jsonl", import.meta.url))
 
@@ -29,6 +30,26 @@ assert.equal(shortReason("error during connect: is the server running?"), "no co
 assert.equal(shortReason("Got permission denied while trying to connect"), "no permission to talk to docker")
 assert.equal(shortReason(""), "no connection to docker", "empty stderr falls back to a generic reason")
 assert.equal(shortReason("x".repeat(80)).length, 60, "long reasons are truncated with an ellipsis")
+
+const compose = parseDockerPs(
+  '{"Names":"/web","State":"running","Labels":"com.docker.compose.project=socnot,com.docker.compose.service=web,com.docker.compose.oneoff=False"}',
+)[0] as Container
+assert.equal(compose.composeProject, "socnot", "compose project read from labels")
+assert.equal(compose.composeService, "web", "compose service read from labels")
+assert.equal((parseDockerPs('{"Names":"/solo","State":"running"}')[0] as Container).composeProject, undefined)
+
+const bare: Container = { name: "lonely", image: "img", state: "running", status: "Up 2 hours", ports: [], createdAt: 0 }
+assert.deepEqual(buildArgs("stop", bare), ["stop", "--", "lonely"], "name is passed after the flag separator")
+assert.deepEqual(buildArgs("restart", compose), ["restart", "--", "web"])
+assert.deepEqual(buildArgs("start", bare), ["start", "--", "lonely"])
+assert.deepEqual(buildArgs("down", compose), ["compose", "-p", "socnot", "down"], "down targets the compose project")
+assert.throws(() => buildArgs("down", bare), /no compose project/, "down is refused without a compose project")
+
+assert.deepEqual(availableActions(compose), ["restart", "stop", "down"], "destructive action goes last")
+assert.deepEqual(availableActions(bare), ["restart", "stop"], "no down without a compose project")
+assert.deepEqual(availableActions({ ...bare, state: "exited" }), ["start"], "a stopped container can only be started")
+assert.deepEqual(availableActions({ ...bare, state: "dead" }), ["start"], "a dead container can only be started")
+assert.deepEqual(availableActions({ ...bare, state: "removing" }), [], "an unknown state offers nothing")
 
 const previous = parsed
 const ok: DockerState = { kind: "empty", containers: [], detail: "no containers" }

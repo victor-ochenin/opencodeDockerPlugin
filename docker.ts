@@ -7,6 +7,9 @@ const ARGS = ["ps", "--all", "--format", "{{json .}}"]
 const TIMEOUT_MS = 4000
 const MAX_BUFFER = 4 * 1024 * 1024
 
+const COMPOSE_PROJECT = "com.docker.compose.project"
+const COMPOSE_SERVICE = "com.docker.compose.service"
+
 export function shortReason(raw: string): string {
   const text = raw.toLowerCase()
   if (text.includes("dockerdesktoplinuxengine") || text.includes("cannot find the file specified")) {
@@ -22,11 +25,26 @@ export function shortReason(raw: string): string {
   return firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine
 }
 
+/** Docker joins labels with commas, and neither a compose project nor a service name may contain one, so a plain split is enough. */
+function composeLabels(raw: string): Pick<Container, "composeProject" | "composeService"> {
+  let composeProject: string | undefined
+  let composeService: string | undefined
+  for (const pair of raw.split(",")) {
+    const eq = pair.indexOf("=")
+    if (eq <= 0) continue
+    const key = pair.slice(0, eq).trim()
+    if (key === COMPOSE_PROJECT) composeProject = pair.slice(eq + 1).trim()
+    else if (key === COMPOSE_SERVICE) composeService = pair.slice(eq + 1).trim()
+  }
+  return { composeProject, composeService }
+}
+
 function toContainer(raw: Record<string, unknown>): Container | null {
   const name = String(raw.Names ?? "")
     .replace(/^\//, "")
     .trim()
   if (!name) return null
+  const compose = composeLabels(String(raw.Labels ?? ""))
   return {
     name,
     image: String(raw.Image ?? ""),
@@ -37,6 +55,7 @@ function toContainer(raw: Record<string, unknown>): Container | null {
       .map((item) => item.trim())
       .filter(Boolean),
     createdAt: Number(raw.CreatedAt ?? 0) || 0,
+    ...compose,
   }
 }
 

@@ -2,9 +2,36 @@
 
 A Docker container panel for the OpenCode 2 TUI sidebar.
 
-The panel appends itself to the `sidebar.content` slot and polls `docker ps --all --format "{{json .}}"`. It is read-only: it shows what is running, which ports are published, and how long a container has been up. It never starts, stops or execs anything.
+The panel appends itself to the `sidebar.content` slot, polls `docker ps --all --format "{{json .}}"`, and lets you act on a container from the row itself. Clicking a row opens a dialog with the actions docker accepts for that container's current state; `Down` is the only one that asks for confirmation.
 
 Русская версия этого файла: [README.ru.md](README.ru.md)
+
+## What it does
+
+```text
+Docker (3)                                              <- click to collapse
+• chroma      127.0.0.1:8000  127.0.0.1:8001            <- click for actions
+• socnot-db   0.0.0.0:5432->5432/tcp · socnot
+```
+
+| Container state | Actions offered |
+|---|---|
+| `running`, `restarting`, `paused` | `Restart`, `Stop`, and `Down` when the container belongs to a compose project |
+| `created`, `exited`, `dead` | `Start` |
+| anything else | none |
+
+| Action | Command |
+|---|---|
+| Start | `docker start -- <name>` |
+| Restart | `docker restart -- <name>` |
+| Stop | `docker stop -- <name>` |
+| Down | `docker compose -p <project> down` |
+
+`--` is not optional: a container name may start with a dash, and without the separator docker reads it as a flag. Every option shows its exact command in the dialog footer, so the destructive one is never a surprise.
+
+`Down` runs `docker compose down` against the compose project the container carries in its labels, which stops every container of that project and removes their networks. Volumes are kept, and the confirmation dialog says so. A container with no compose project never gets the option, and `buildArgs` refuses it as well.
+
+The result of every action arrives as a toast, and the panel refreshes immediately instead of waiting for the next poll. While a command runs the header shows `working` and further clicks are ignored, so a double click cannot launch two commands.
 
 ## What it shows
 
@@ -37,18 +64,21 @@ A missing or stopped Docker is a normal state, not a plugin failure, so it is re
 ## Layout
 
 ```text
-tui.tsx       CLI entrypoint: default export, registers the sidebar slot
-panel.tsx     Solid component: header, rows, states
+tui.tsx       CLI entrypoint: registers the sidebar slot
+panel.tsx     Solid component: header, rows, states, action dialog
 poll.ts       polling loop: owns the last known rows and the refresh timer
+commands.ts   builds and runs the lifecycle commands
 docker.ts     runs docker ps, parses and sorts the output
 types.ts      container and state types
-scripts/      parser check
+scripts/      parser and command checks
 fixtures/     captured docker ps output used by the check
 ```
 
-There is deliberately no server entrypoint. The plugin is CLI-only, so OpenCode never asks the server to load it, and no `@opencode/plugin` import has to resolve. The entrypoint exports a plain object with `id` and `setup`; the host passes the plugin context in and the panel reads `context.theme` from it. This is the same shape the herdr integration uses.
+There is deliberately no server entrypoint. The plugin is CLI-only, so OpenCode never asks the server to load it and no `@opencode/plugin` value import has to resolve at runtime. The entrypoint exports a plain object with `id` and `setup`, typed as `Plugin.Definition` and checked against `Plugin.Context` with a type-only import, which is erased at load time. That is what proves the shape is right: the slot claim, the dialog options, the toast variants and the theme tokens below are all checked against the published types rather than against a local guess.
 
-`context.ui.slot()` is typed locally in `tui.tsx`, not imported from a package, because no published types were available. The shape matches what the host passes at runtime, and `setup` throws a descriptive error if `ui.slot` is missing, but the signature has not been verified against a released type definition. The panel strings are English only; the docs are bilingual. The package is not installable from npm: it ships a `.tsx` entrypoint and expects the host to transpile it and to provide `solid-js` and `@opentui/*`, which is why they are dev dependencies.
+Colors come straight from `context.theme`: `text.base`, `text.muted` and `text.feedback.{success,warning,error}.base`. They are required, typed `RGBA` tokens, so there is no fallback chain to keep in sync, and a host that stops providing them fails the build instead of silently rendering the wrong hue.
+
+The panel strings are English only; the docs are bilingual. The package is not installable from npm: it ships a `.tsx` entrypoint and expects the host to transpile it and to provide `solid-js` and `@opentui/*`, which is why they are dev dependencies.
 
 ## Install
 
@@ -96,7 +126,7 @@ fixture: 3 containers -> chroma:running, postgres:running, worker-old:exited
 live: kind=ok detail=- containers=2
 ```
 
-The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for the fixture part.
+The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, compose label extraction, the exact command line built for every action, which actions each state offers, and the polling rule that a failed poll keeps the last rows. It then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for everything except that last line.
 
 Type checking:
 
@@ -105,11 +135,15 @@ npm install
 npm run typecheck
 ```
 
+Type checking is also how the plugin is validated against the host: `@opencode/plugin` and `@opencode/theme` are dev-only type sources, so a breaking change in the TUI plugin API fails `npm run typecheck` instead of failing at load.
+
 ## Known limits
 
-- OpenCode 2 is in beta, so the slot name and the theme token shape may change. Colors are resolved defensively with fallbacks for that reason, and the header can be pinned to literal tokens once the shape is confirmed.
+- OpenCode 2 is in beta, so slot names and theme tokens may change; that surfaces as a type error rather than a runtime surprise.
 - The poll spawns `docker ps` on an interval. On a host with hundreds of containers, raise `intervalMs` to 5000 or higher.
-- No log tail, no exec, no start or stop, no compose grouping, no restart history. Those are separate features and each one is deliberately out of scope here.
+- Rows are capped at ten with an `N more` line and there is no scrolling, which suits a sidebar but not a real container list.
+- No log tail, no exec, no volume or image actions, no restart history. `Down` is offered per container but acts on the whole compose project.
+- Actions are mouse-only; the plugin registers no keymap layer.
 
 ## License
 
