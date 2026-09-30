@@ -6,6 +6,8 @@
 
 English version of this file: [README.md](README.md)
 
+![Панель Docker в сайдбаре сессии, диалог действий и окно логов](docs/demo.gif)
+
 ## Что показывает панель
 
 ```text

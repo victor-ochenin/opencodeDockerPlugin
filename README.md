@@ -6,6 +6,8 @@ The panel appends itself to the `sidebar.content` slot, polls `docker ps --all -
 
 Русская версия этого файла: [README.ru.md](README.ru.md)
 
+![The Docker panel in the session sidebar, a container action dialog and the log view](docs/demo.gif)
+
 ## What it does
 
 ```text
