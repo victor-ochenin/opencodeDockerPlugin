@@ -1,5 +1,7 @@
 # opencode-docker-panel
 
+[![CI](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml/badge.svg)](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml)
+
 Панель контейнеров Docker для бокового сайдбара OpenCode 2.
 
 Плагин добавляет себя в слот `sidebar.content`, опрашивает `docker ps --all --format "{{json .}}"` и позволяет действовать с контейнером прямо из строки. Клик по строке открывает диалог с командами, которые docker принимает в текущем состоянии контейнера, и только `Down` спрашивает подтверждение.

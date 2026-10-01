@@ -1,5 +1,7 @@
 # opencode-docker-panel
 
+[![CI](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml/badge.svg)](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml)
+
 A Docker container panel for the OpenCode 2 TUI sidebar.
 
 The panel appends itself to the `sidebar.content` slot, polls `docker ps --all --format "{{json .}}"`, and lets you act on a container from the row itself. Clicking a row opens a dialog with the actions docker accepts for that container's current state; `Down` is the only one that asks for confirmation.
