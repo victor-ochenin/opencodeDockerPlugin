@@ -224,7 +224,7 @@ const named = (name: string, state: string): Container => ({
   ports: [],
   createdAt: 0,
 })
-// docker.ts already sorts running first, so the fixtures have to arrive in that order for the checks to mean anything.
+// docker.ts already sorts running first, so the fixtures have to arrive in that order for the checks to mean anything
 const busyHost = Array.from({ length: 12 }, (_, index) => named(`live-${index}`, "running"))
 const quietHost = [named("old-a", "exited"), named("old-b", "dead"), named("old-c", "created")]
 

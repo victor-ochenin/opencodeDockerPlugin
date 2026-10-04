@@ -5,7 +5,7 @@ import type { Container, DockerState } from "./types.ts"
 
 const INITIAL: DockerState = { kind: "empty", containers: [], detail: "loading" }
 
-/** docker reports the old state for a moment after start or stop, so an action is polled twice. */
+/** docker reports the old state for a moment after start or stop, so an action is polled twice */
 const SETTLE_MS = 1200
 
 export function keepContainers(previous: Container[], next: DockerState): Container[] {
@@ -13,12 +13,14 @@ export function keepContainers(previous: Container[], next: DockerState): Contai
   return next.containers
 }
 
-/** The sidebar belongs to what runs right now, so it shows five running containers and nothing else. */
+/** The sidebar belongs to what runs right now, not to every container that exists */
 export const MAX_RUNNING = 5
 
 /**
- * A pinned container is shown whatever its state, and spends the running budget when it happens to run,
- * so pinning everything shows everything. Stopped containers get no row: the dialog is their only door.
+ * A pinned container is shown whatever its state and spends the running budget when it happens to
+ * run, so pinning everything shows everything.
+ *
+ * Stopped containers get no row, the dialog is their only door.
  */
 export function selectRows(all: Container[], pinned: string[]): Container[] {
   const isPinned = (item: Container) => pinned.includes(item.name)
@@ -33,12 +35,12 @@ export interface DockerPolling {
   readonly refreshAfterAction: () => Promise<void>
 }
 
-/** The host does not repaint this slot when only a signal changes, so the panel is remounted on a real change. */
+/** The host does not repaint this slot when only a signal changes, so a real change remounts the panel */
 function signature(containers: Container[]): string {
   return containers.map((item) => `${item.name}:${item.state}`).join("|")
 }
 
-/** A container in a crash loop changes state on every poll, and each remount costs a fresh docker ps. */
+/** A container in a crash loop changes state on every poll and each remount costs a fresh docker ps */
 const RELOAD_COOLDOWN_MS = 10000
 
 export function createDockerPolling(intervalMs: number, onContentChange: () => void, onPoll?: () => void): DockerPolling {

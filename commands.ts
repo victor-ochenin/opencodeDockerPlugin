@@ -15,12 +15,12 @@ export const ACTION_LABEL: Record<ContainerAction, string> = {
   down: "Down compose project",
 }
 
-/** The name is passed after `--` because a container name may start with a dash and docker would read it as a flag. */
+/** The name goes after `--` because a container name may start with a dash and docker reads it as a flag */
 export function buildArgs(action: ContainerAction, container: Container, target?: ComposeTarget | null): string[] {
   if (action === "up") {
     if (!target) throw new Error(`container ${container.name} has no resolved compose target`)
-    // Both flags are explicit: the project name in the file can be templated or overridden by the
-    // environment, and this way `up` acts on the very project the panel is already showing.
+    // Both flags are explicit because the project's `name:` can be templated or overridden by the
+    // environment, and this way `up` acts on the project the panel is already showing
     return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
   }
   if (action === "down") {
@@ -31,7 +31,7 @@ export function buildArgs(action: ContainerAction, container: Container, target?
   return [action, "--", container.name]
 }
 
-/** Only offers what docker accepts for the current state, with the destructive action last. */
+/** Only what docker accepts for the current state, with the destructive action last */
 export function availableActions(container: Container, target?: ComposeTarget | null): ContainerAction[] {
   const down: ContainerAction[] = container.composeProject ? ["down"] : []
   const up: ContainerAction[] = container.composeProject && target ? ["up"] : []
@@ -64,8 +64,10 @@ export interface CommandResult {
 }
 
 /**
- * Runs an already-built argument list. `up` has no container behind it, so the boundary takes the
- * argv rather than a container the caller would have to invent to satisfy the type.
+ * Runs an already-built argument list.
+ *
+ * `up` has no container behind it, so the boundary takes the argv rather than a container the caller
+ * would have to invent to satisfy the type.
  */
 export function runDockerArgs(args: readonly string[]): Promise<CommandResult> {
   return new Promise((resolve) => {

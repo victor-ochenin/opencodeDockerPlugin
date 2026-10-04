@@ -7,7 +7,6 @@ const MAX_BUFFER = 4 * 1024 * 1024
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g
 
-/** One source for both timestamp shapes, so the two patterns cannot drift apart. */
 const STAMP = String.raw`\d{4}-\d{2}-\d{2}T\S+`
 const TIMESTAMP_ONLY = new RegExp(`^${STAMP}$`)
 const TIMESTAMPED = new RegExp(`^(${STAMP})\\s+(.*)$`)
@@ -25,7 +24,7 @@ export interface LogResult {
   readonly error?: string
 }
 
-/** The terminal would run ANSI sequences from a log as control codes, and a lone CR is a line terminator, not an overwrite. */
+/** The terminal would run ANSI sequences as control codes, and a lone CR is a terminator, not an overwrite */
 export function sanitize(raw: string): string[] {
   return raw
     .replace(ANSI, "")
@@ -41,7 +40,7 @@ function level(text: string): LogLevel {
   return "info"
 }
 
-/** docker prefixes every line with an RFC3339 timestamp when asked, so a log line splits into a time and the rest. */
+/** docker prefixes every line with an RFC3339 timestamp when asked, so a line splits into time and rest */
 export function parseLogLines(raw: string): LogLine[] {
   const lines: LogLine[] = []
   for (const line of sanitize(raw)) {
@@ -57,7 +56,7 @@ export function parseLogLines(raw: string): LogLine[] {
   return lines
 }
 
-/** docker interleaves the container's two streams, so the real order only survives in the timestamps. */
+/** docker interleaves the container's two streams, so the real order only survives in the timestamps */
 export function mergeLogLines(parts: string[]): LogLine[] {
   const lines = parts.flatMap((part) => parseLogLines(part))
   return lines.sort((a, b) => (a.time || "￿").localeCompare(b.time || "￿")).slice(-TAIL)

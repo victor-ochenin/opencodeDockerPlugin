@@ -11,7 +11,7 @@ import type { Container, ContainerAction } from "./types.ts"
 const LOG_VIEW_LINES = 15
 const LOG_REFRESH_MS = 2000
 
-/** The argv a stack needs, in one place so the menu footer and the run cannot drift apart. */
+/** One source for the argv, so the menu footer and the run cannot drift apart */
 function stackArgs(target: ComposeTarget): string[] {
   return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
 }
@@ -44,7 +44,7 @@ function hasStaleRows(state: { kind: string; containers: Container[] }): boolean
   return (state.kind === "unavailable" || state.kind === "stale") && state.containers.length > 0
 }
 
-/** A fixed viewport is the only way to keep the height predictable: opentui has no scrollable container. */
+/** Fixed viewport: opentui has no scrollable container, so the height has to be predictable */
 function LogsView(props: {
   name: string
   result: LogResult | null
@@ -162,8 +162,7 @@ export function DockerPanel(props: {
     if (logs()) props.ui.dialog.clear()
   })
 
-  // Read the compose file when the panel mounts and again on every poll, never while the host is
-  // assembling the render tree.
+  // Read on mount and on every poll, never while the host assembles the render tree
   const [stackSignal, setStackSignal] = createSignal<ComposeTarget | null>(null)
   const [pendingStack, setPendingStack] = createSignal<ComposeTarget | null>(null)
   const derivePendingStack = (stack: ComposeTarget | null) => {
@@ -178,7 +177,7 @@ export function DockerPanel(props: {
   }
   const polling = createDockerPolling(props.intervalMs, props.reload, refreshStack)
 
-  /** One entry point for every action, so the busy guard and the refresh cannot be forgotten. */
+  /** Single entry point, so the busy guard and the refresh cannot be skipped */
   const run = async (action: ContainerAction, title: string, args: readonly string[]) => {
     if (busy()) return
     setBusy(true)
@@ -192,13 +191,7 @@ export function DockerPanel(props: {
     await polling.refreshAfterAction()
   }
 
-  /**
-   * The stack the agent directory declares, but only while none of its containers is on the machine.
-   * Computed once per poll instead of inside the markup: a `Show` and its own label both read this,
-   * and re-deriving it during render is what the crash traced back to.
-   */
-
-  /** The list of every container, from which picking one opens the same actions as its row does. */
+  /** Opens the same actions for a container the sidebar does not show */
   const pickContainer = async (all: readonly Container[]) => {
     const choice = await props.ui.dialog.select<Container>({
       title: `All containers (${all.length})`,
@@ -211,15 +204,12 @@ export function DockerPanel(props: {
       })),
     })
     if (!choice) return
-    // The list is a snapshot: a container can stop while it is open, so re-read it before offering actions.
+    // The list is a snapshot, a container can stop while it is open, so re-read before acting
     const fresh = polling.state().containers.find((item) => item.name === choice.name)
     if (fresh) await openMenu(fresh)
   }
 
-  /**
-   * The single door to the containers the sidebar does not show. Clicking the header lands on the
-   * list itself, so there is no menu to pick through first.
-   */
+  /** Single door to the containers the sidebar does not show, so the header opens the list itself */
   const openBrowse = async () => {
     if (busy()) return
     const all = polling.state().containers
@@ -230,10 +220,7 @@ export function DockerPanel(props: {
     await pickContainer(all)
   }
 
-  /**
-   * A stack has no container to be the subject of the action, and its file carries build, command and
-   * entrypoint, so it asks once and shows the exact argv in the prompt.
-   */
+  /** A stack has no container to act on and its file carries build and command lines, so confirm with the exact argv */
   const openStack = async () => {
     if (busy()) return
     const stack = pendingStack()
@@ -250,7 +237,7 @@ export function DockerPanel(props: {
   const openMenu = async (container: Container) => {
     if (busy()) return
     const isPinned = props.pinned.includes(container.name)
-    // Read once per menu: compose can build images, so the action must not wait on a second read.
+    // Read once per menu, compose can build images and the action must not wait on a second read
     const stack = stackSignal()?.project === container.composeProject ? stackSignal() : null
     const options = [
       ...availableActions(container, stack).map((item) => ({
@@ -313,8 +300,7 @@ export function DockerPanel(props: {
 
 
   // A click in opentui is a mousedown plus a mouseup, and the host dismisses an overlay from the
-  // next mouse event it sees. Every dialog is therefore armed on the release, and only mounted after
-  // that release has finished propagating, so the release cannot land on its own backdrop.
+  // next mouse event it sees, so every dialog is armed on the release and mounted after it propagates
   const arm = (open: () => void, event: { stopPropagation: () => void }) => {
     event.stopPropagation()
     setTimeout(() => void open(), 0)

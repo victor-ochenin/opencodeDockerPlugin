@@ -5,7 +5,7 @@
  * every path under `node_modules`: `^(?!.*[/\\]node_modules[/\\]).*\.[cm]?[jt]sx$`. A plugin
  * installed from npm lives under `node_modules`, so the transform never fires and Bun falls back
  * to its default JSX runtime, which is React's. OpenTUI's own docs prescribe the fix: publish
- * precompiled ESM. See `docs/research/opencode-plugin-loader.md` for the full chain.
+ * precompiled ESM.
  *
  * Files are transpiled one to one and keep their layout. Nothing is bundled, because bundling
  * relocates `import.meta.url` and breaks plugin-relative assets (upstream opencode#39986 rejected
@@ -22,13 +22,13 @@ import typescriptPreset from "@babel/preset-typescript"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const out = join(root, "dist")
 
-/** Same options OpenTUI's own transform uses, so the output matches what the host would produce. */
+/** Same options OpenTUI's own transform uses, so the output matches what the host would produce */
 const presets = [
   [solidPreset, { moduleName: "@opentui/solid", generate: "universal" }],
   [typescriptPreset],
 ]
 
-/** Sources import each other with explicit extensions, which have to point at the emitted `.js`. */
+/** Sources import each other with explicit extensions, which have to point at the emitted `.js` */
 const rewriteSpecifiers = (code: string) => code.replace(/((?:from|import)\s*["'])(\.{1,2}\/[^"']+?)\.tsx?(["'])/g, "$1$2.js$3")
 
 async function build() {

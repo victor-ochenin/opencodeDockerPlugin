@@ -25,7 +25,7 @@ export function shortReason(raw: string): string {
   return firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine
 }
 
-/** Docker joins labels with commas, and neither a compose project nor a service name may contain one, so a plain split is enough. */
+/** Docker joins labels with commas and neither a compose project nor a service name may contain one, so a plain split is enough */
 function composeLabels(raw: string): Pick<Container, "composeProject" | "composeService"> {
   let composeProject: string | undefined
   let composeService: string | undefined
@@ -39,7 +39,7 @@ function composeLabels(raw: string): Pick<Container, "composeProject" | "compose
   return { composeProject, composeService }
 }
 
-/** docker reports CreatedAt either as a unix timestamp in seconds or as a date with a trailing zone name, which Date.parse rejects. */
+/** docker reports CreatedAt as a unix timestamp in seconds or as a date with a trailing zone name, which Date.parse rejects */
 function parseCreatedAt(raw: unknown): number {
   const text = String(raw ?? "").trim()
   if (!text) return 0

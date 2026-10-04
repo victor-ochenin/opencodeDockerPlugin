@@ -1,10 +1,9 @@
 /**
  * Smoke test for the published artifact.
  *
- * The failure this guards against is specific and expensive: under `node_modules` the host's Solid
- * transform never runs, so a stray `.tsx` or a stale relative specifier only shows up as a TUI
- * crash at runtime. Importing the built entry and driving `setup` against a stub context catches
- * both here instead.
+ * The failure it guards against is specific and expensive: under `node_modules` the host's Solid
+ * transform never runs, so a stray `.tsx` or a stale relative specifier surfaces only as a TUI crash
+ * at runtime. Importing the built entry and driving `setup` against a stub context catches both here.
  */
 import { pathToFileURL } from "node:url"
 import { dirname, join, resolve } from "node:path"

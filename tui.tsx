@@ -14,7 +14,7 @@ const plugin: Plugin.Definition = {
     const [pinned, setPinned] = context.storage.store("docker-panel.pinned", { initial: { names: [] as string[] } })
     let dispose: (() => void) | undefined
 
-    /** Durable storage is the host's own, so a pin outlives the TUI without this plugin owning any user file. */
+    /** Durable storage is the host's own, so a pin outlives the TUI without this plugin owning a user file */
     async function togglePin(name: string): Promise<void> {
       await setPinned((draft) => {
         const index = draft.names.indexOf(name)
@@ -23,7 +23,7 @@ const plugin: Plugin.Definition = {
       })
     }
 
-    /** Drops the current claim and registers it again, which is the only way to make the host paint the slot anew. */
+    /** Drops the claim and registers it again, the only way to make the host paint the slot anew */
     function reload() {
       queueMicrotask(() => {
         dispose?.()
