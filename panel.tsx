@@ -2,13 +2,19 @@ import { Index, Show, createSignal, onCleanup } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
-import { ACTION_LABEL, availableActions, buildArgs, runContainerCommand, type CommandResult } from "./commands.ts"
+import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs } from "./commands.ts"
+import { findComposeFile, resolveComposeTarget, type ComposeTarget } from "./compose.ts"
 import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
 import { createDockerPolling, selectRows } from "./poll.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
 const LOG_VIEW_LINES = 15
 const LOG_REFRESH_MS = 2000
+
+/** The argv a stack needs, in one place so the menu footer and the run cannot drift apart. */
+function stackArgs(target: ComposeTarget): string[] {
+  return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
+}
 
 type MenuChoice = ContainerAction | "logs" | "pin"
 
@@ -95,6 +101,7 @@ function LogsView(props: {
 
 export function DockerPanel(props: {
   intervalMs: number
+  agentDir: string
   pinned: string[]
   onTogglePin: (name: string) => Promise<void>
   theme: ResolvedTheme
@@ -156,32 +163,104 @@ export function DockerPanel(props: {
     if (logs()) props.ui.dialog.clear()
   })
 
-  const report = (container: Container, action: ContainerAction, result: CommandResult) => {
+  // The compose file is read synchronously and the slot repaints on every poll, so read it once per
+  // render instead of once per mention: the footer and the label below it must not disagree.
+  let cachedDir = props.agentDir
+  let cachedStack: ComposeTarget | null = findComposeFile(props.agentDir)
+  const stackFile = () => {
+    if (props.agentDir !== cachedDir) {
+      cachedDir = props.agentDir
+      cachedStack = findComposeFile(props.agentDir)
+    }
+    return cachedStack
+  }
+
+  /** One entry point for every action, so the busy guard and the refresh cannot be forgotten. */
+  const run = async (action: ContainerAction, title: string, args: readonly string[]) => {
+    if (busy()) return
+    setBusy(true)
+    const result = await runDockerArgs(args)
+    setBusy(false)
     props.ui.toast.show({
-      title: container.name,
+      title,
       message: result.ok ? `${ACTION_LABEL[action]}: ${result.message}` : result.message,
       variant: result.ok ? "success" : "error",
     })
+    await polling.refreshAfterAction()
   }
 
-  const run = async (action: ContainerAction, container: Container) => {
+  /** The stack the agent directory declares, but only while none of its containers is on the machine. */
+  const unstartedStack = () => {
+    const stack = stackFile()
+    if (!stack) return null
+    return polling.state().containers.some((item) => item.composeProject === stack.project) ? null : stack
+  }
+
+  /** The list of every container, from which picking one opens the same actions as its row does. */
+  const pickContainer = async (all: readonly Container[]) => {
+    const choice = await props.ui.dialog.select<Container>({
+      title: `All containers (${all.length})`,
+      placeholder: "Container",
+      options: all.map((container) => ({
+        title: container.name,
+        value: container,
+        description: detailLabel(container, props.pinned),
+        footer: container.state,
+      })),
+    })
+    if (!choice) return
+    // The list is a snapshot: a container can stop while it is open, so re-read it before offering actions.
+    const fresh = polling.state().containers.find((item) => item.name === choice.name)
+    if (fresh) await openMenu(fresh)
+  }
+
+  /**
+   * The single door to the containers the sidebar does not show. Clicking the header lands on the
+   * list itself, so there is no menu to pick through first.
+   */
+  const openBrowse = async () => {
     if (busy()) return
-    setBusy(true)
-    const result = await runContainerCommand(action, container)
-    setBusy(false)
-    report(container, action, result)
-    await polling.refreshAfterAction()
+    const all = polling.state().containers
+    if (all.length === 0) {
+      props.ui.toast.show({ title: "Docker", message: "no containers", variant: "info" })
+      return
+    }
+    await pickContainer(all)
+  }
+
+  /**
+   * A stack has no container to be the subject of the action, and its file carries build, command and
+   * entrypoint, so it asks once and shows the exact argv in the prompt.
+   */
+  const openStack = async () => {
+    if (busy()) return
+    const stack = unstartedStack()
+    if (!stack) return
+    const confirmed = await props.ui.dialog.confirm({
+      title: `Up ${stack.project}?`,
+      message: `Starts every service of this compose project from ${stack.file}:\n\n${stackArgs(stack).join(" ")}`,
+      label: { confirm: "Up stack", cancel: "Cancel" },
+    })
+    if (!confirmed) return
+    await run("up", stack.project, stackArgs(stack))
   }
 
   const openMenu = async (container: Container) => {
     if (busy()) return
     const isPinned = props.pinned.includes(container.name)
+    // Read once per menu: compose can build images, so the action must not wait on a second read.
+    const stack = resolveComposeTarget(props.agentDir, container.composeProject ?? "")
     const options = [
-      ...availableActions(container).map((item) => ({
+      ...availableActions(container, stack).map((item) => ({
         title: ACTION_LABEL[item],
         value: item as MenuChoice,
-        description: item === "down" ? `stops every container of ${container.composeProject}` : container.status,
-        footer: buildArgs(item, container).join(" "),
+        description:
+          item === "down"
+            ? `stops every container of ${container.composeProject}`
+            : item === "up"
+              ? `starts every service of ${stack?.project} from the agent directory`
+              : container.status,
+        footer: buildArgs(item, container, stack).join(" "),
       })),
       {
         title: "Logs",
@@ -220,7 +299,7 @@ export function DockerPanel(props: {
         })
         if (!confirmed) return
       }
-      await run(choice, container)
+      await run(choice, container.name, buildArgs(choice, container, stack))
     } catch (error) {
       props.ui.toast.show({
         title: container.name,
@@ -230,6 +309,7 @@ export function DockerPanel(props: {
     }
   }
 
+
   // A click in opentui is a mousedown plus a mouseup, and the host dismisses an overlay from the
   // next mouse event it sees. Every dialog is therefore armed on the release, and only mounted after
   // that release has finished propagating, so the release cannot land on its own backdrop.
@@ -238,36 +318,15 @@ export function DockerPanel(props: {
     setTimeout(() => void open(), 0)
   }
 
-  /** With rows under it the header collapses them; with nothing to show it is the only door to the stopped ones. */
-  const openAll = async () => {
-    if (busy()) return
-    const all = polling.state().containers
-    if (all.length === 0) return
-    const choice = await props.ui.dialog.select<Container>({
-      title: `All containers (${all.length})`,
-      placeholder: "Container",
-      options: all.map((container) => ({
-        title: container.name,
-        value: container,
-        description: detailLabel(container, props.pinned),
-        footer: container.state,
-      })),
-    })
-    if (!choice) return
-    // The list is a snapshot: a container can stop while it is open, so re-read it before offering actions.
-    const fresh = polling.state().containers.find((item) => item.name === choice.name)
-    if (fresh) await openMenu(fresh)
-  }
-
-  const rows = () => selectRows(polling.state().containers, props.pinned)
-  const hasRows = () => rows().length > 0
+  const visible = () => selectRows(polling.state().containers, props.pinned)
+  const hasRows = () => visible().length > 0
 
   const pressHeader = () => {
     if (hasRows()) {
       setOpen((value) => !value)
       return
     }
-    void openAll()
+    void openBrowse()
   }
 
   return (
@@ -279,7 +338,7 @@ export function DockerPanel(props: {
             <span style={{ fg: theme().text.muted }}> ({polling.state().containers.length})</span>
           </Show>
           <Show when={!hasRows() && polling.state().containers.length > 0}>
-            <span style={{ fg: theme().text.muted }}> click for all</span>
+            <span style={{ fg: theme().text.muted }}> click for the list</span>
           </Show>
         </text>
         <Show when={hasStaleRows(polling.state())}>
@@ -295,7 +354,7 @@ export function DockerPanel(props: {
       </Show>
 
       <Show when={polling.state().containers.length > 0 && open()}>
-        <Index each={rows()}>
+        <Index each={visible()}>
           {(container) => (
             <box flexDirection="row" gap={1} onMouseUp={(event) => arm(() => openMenu(container()), event)}>
               <text flexShrink={0} fg={dotColor(theme(), container().state)}>
@@ -308,12 +367,19 @@ export function DockerPanel(props: {
             </box>
           )}
         </Index>
-        <Show when={hasRows() && polling.state().containers.length > rows().length}>
-          <text fg={theme().text.muted} onMouseUp={(event) => arm(openAll, event)}>
+        <Show when={hasRows() && polling.state().containers.length > visible().length}>
+          <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}>
             {" "}
-            {polling.state().containers.length - rows().length} more, click for all
+            {polling.state().containers.length - visible().length} more, click for all
           </text>
         </Show>
+      </Show>
+
+      <Show when={unstartedStack()}>
+        <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
+          <b>Up stack</b>
+          <span style={{ fg: theme().text.muted }}> · {unstartedStack()?.project} is not running here</span>
+        </text>
       </Show>
     </box>
   )

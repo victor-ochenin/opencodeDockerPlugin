@@ -1,9 +1,13 @@
 import assert from "node:assert/strict"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
 import { availableActions, buildArgs } from "../commands.ts"
+import { findComposeFile, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { keepContainers, selectRows } from "../poll.ts"
 import type { Container, DockerState } from "../types.ts"
@@ -67,6 +71,98 @@ assert.deepEqual(
 )
 assert.deepEqual(availableActions({ ...bare, state: "dead" }), ["start"], "a dead container can only be started")
 assert.deepEqual(availableActions({ ...bare, state: "removing" }), [], "an unknown state offers nothing")
+
+const stack = { dir: "/agent", file: "/agent/compose.yaml", project: "socnot" }
+assert.deepEqual(
+  buildArgs("up", compose, stack),
+  ["compose", "-f", "/agent/compose.yaml", "-p", "socnot", "up", "-d"],
+  "up passes the file and the project explicitly, with -f before -p",
+)
+assert.throws(() => buildArgs("up", compose), /no resolved compose target/, "up is refused without a resolved target")
+assert.deepEqual(
+  availableActions({ ...compose, state: "exited" }, stack),
+  ["start", "up", "down"],
+  "up sits between the reversible start and the destructive down",
+)
+assert.deepEqual(
+  availableActions({ ...compose, state: "exited" }),
+  ["start", "down"],
+  "a compose container with no matching file in the agent directory gets no up",
+)
+assert.deepEqual(
+  availableActions(compose, stack),
+  ["restart", "stop", "down"],
+  "a running container is never offered up, it is already up",
+)
+assert.deepEqual(
+  availableActions({ ...bare, state: "exited" }, stack),
+  ["start"],
+  "up needs a compose label to match the file against",
+)
+
+const composeRoot = mkdtempSync(join(tmpdir(), "docker-panel-compose-"))
+try {
+  const declared = join(composeRoot, "declared")
+  mkdirSync(declared)
+  writeFileSync(join(declared, "compose.yaml"), "name: socnot\nservices:\n  web:\n    build: .\n")
+  const resolved = resolveComposeTarget(declared, "socnot")
+  assert.equal(resolved?.project, "socnot", "a top-level name: declares the project")
+  assert.equal(resolved?.dir, declared, "the target keeps the agent directory")
+  assert.equal(resolved?.file, join(declared, "compose.yaml"), "the target points at the file on disk")
+  assert.equal(resolveComposeTarget(declared, "other"), null, "a foreign project is refused instead of offered")
+  assert.equal(resolveComposeTarget(declared, ""), null, "an empty label cannot match a project")
+
+  const byDir = join(composeRoot, "bydir")
+  mkdirSync(byDir)
+  writeFileSync(join(byDir, "docker-compose.yml"), "services:\n  web:\n    image: nginx\n")
+  assert.equal(
+    resolveComposeTarget(byDir, basename(byDir))?.project,
+    basename(byDir),
+    "without name: the project is the directory the file lives in",
+  )
+
+  const shadowed = join(composeRoot, "shadowed")
+  mkdirSync(shadowed)
+  writeFileSync(join(shadowed, "compose.yaml"), "name: someoneelse\nservices: {}\n")
+  writeFileSync(join(shadowed, "docker-compose.yml"), "name: shadowed\nservices: {}\n")
+  assert.equal(resolveComposeTarget(shadowed, "shadowed"), null, "a foreign project hides up rather than pointing it elsewhere")
+  assert.equal(
+    findComposeFile(shadowed)?.project,
+    "someoneelse",
+    "the file is still found, it just belongs to a project the container is not part of",
+  )
+
+  assert.equal(resolveComposeTarget(join(composeRoot, "empty"), "any"), null, "no compose file means no target")
+  assert.equal(findComposeFile(join(composeRoot, "empty")), null, "no compose file is not a stack to start")
+
+  const bom = join(composeRoot, "bom")
+  mkdirSync(bom)
+  writeFileSync(join(bom, "compose.yaml"), "\uFEFFname: bommed\nservices: {}\n")
+  assert.equal(
+    findComposeFile(bom)?.project,
+    "bommed",
+    "a UTF-8 BOM must not push the file onto the directory-name fallback, PowerShell writes one",
+  )
+
+  const crlf = join(composeRoot, "crlf")
+  mkdirSync(crlf)
+  writeFileSync(join(crlf, "compose.yaml"), "name: windows\r\nservices:\r\n  web:\r\n    build: .\r\n")
+  assert.equal(findComposeFile(crlf)?.project, "windows", "CRLF line endings do not leak a carriage return into the name")
+
+  const neverStarted = join(composeRoot, "never-started")
+  mkdirSync(neverStarted)
+  writeFileSync(join(neverStarted, "compose.yaml"), "name: fresh\nservices:\n  web:\n    build: .\n")
+  const fresh = findComposeFile(neverStarted)
+  assert.equal(fresh?.project, "fresh", "a file with no containers still names a project to start")
+  const ghost: Container = { name: "fresh", image: "", state: "exited", status: "", ports: [], createdAt: 0 }
+  assert.deepEqual(
+    buildArgs("up", ghost, fresh ?? undefined),
+    ["compose", "-f", join(neverStarted, "compose.yaml"), "-p", "fresh", "up", "-d"],
+    "a stack with no container yet is started with the same explicit flags",
+  )
+} finally {
+  rmSync(composeRoot, { recursive: true, force: true })
+}
 
 const ansi = "\u001b[31mred\u001b[0m plain \u001b[1mbold\u001b[0m"
 assert.deepEqual(sanitize(ansi), ["red plain bold"], "ANSI sequences are stripped")
@@ -151,6 +247,11 @@ assert.equal(
 )
 assert.equal(selectRows(busyHost, ["live-9"])[0]?.name, "live-9", "pinned rows come before the running ones")
 assert.deepEqual(selectRows(quietHost, ["gone"]), [], "a pin for a container that no longer exists is ignored")
+assert.deepEqual(
+  selectRows([named("paused-one", "paused"), named("restarting-one", "restarting")], []),
+  [],
+  "a paused or restarting container gets no row: the sidebar shows what is serving, not what exists",
+)
 
 const live = await runDockerPs()
 assert.ok(["ok", "empty", "unavailable", "stale"].includes(live.kind), `unexpected live status: ${live.kind}`)

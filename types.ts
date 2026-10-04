@@ -1,6 +1,6 @@
 export type DockerStateKind = "ok" | "empty" | "unavailable" | "stale"
 
-export type ContainerAction = "start" | "restart" | "stop" | "down"
+export type ContainerAction = "start" | "up" | "restart" | "stop" | "down"
 
 export interface Container {
   name: string

@@ -1,6 +1,6 @@
 {
   "name": "opencode-docker-panel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Docker container panel for the OpenCode 2 TUI sidebar",
   "keywords": [
     "opencode",
@@ -30,10 +30,12 @@
     "panel.tsx",
     "poll.ts",
     "commands.ts",
+    "compose.ts",
     "docker.ts",
     "logs.ts",
     "types.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

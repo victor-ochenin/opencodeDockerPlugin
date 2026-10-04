@@ -10,6 +10,7 @@ const plugin: Plugin.Definition = {
   setup(context) {
     const requested = Number(context.options.intervalMs)
     const intervalMs = Number.isFinite(requested) ? Math.min(Math.max(requested, MIN_INTERVAL), MAX_INTERVAL) : 3000
+    const agentDir = context.location?.directory ?? process.cwd()
     const [pinned, setPinned] = context.storage.store("docker-panel.pinned", { initial: { names: [] as string[] } })
     let dispose: (() => void) | undefined
 
@@ -35,6 +36,7 @@ const plugin: Plugin.Definition = {
       render: () => (
         <DockerPanel
           intervalMs={intervalMs}
+          agentDir={agentDir}
           pinned={pinned.names}
           onTogglePin={togglePin}
           theme={context.theme}
