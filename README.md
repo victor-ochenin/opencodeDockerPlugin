@@ -1,6 +1,7 @@
 # opencode-docker-panel
 
 [![CI](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml/badge.svg)](https://github.com/victor-ochenin/opencodeDockerPlugin/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/opencode-docker-panel.svg)](https://www.npmjs.com/package/opencode-docker-panel)
 
 A Docker container panel for the OpenCode 2 TUI sidebar.
 
