@@ -1,15 +1,53 @@
 {
   "name": "opencode-docker-panel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Docker container panel for the OpenCode 2 TUI sidebar",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-tui",
+    "docker",
+    "docker-compose",
+    "sidebar",
+    "tui"
+  ],
+  "homepage": "https://github.com/victor-ochenin/opencodeDockerPlugin#readme",
+  "bugs": {
+    "url": "https://github.com/victor-ochenin/opencodeDockerPlugin/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/victor-ochenin/opencodeDockerPlugin.git",
+    "directory": "."
+  },
   "type": "module",
   "license": "MIT",
   "exports": {
     "./tui": "./tui.tsx"
   },
+  "files": [
+    "tui.tsx",
+    "panel.tsx",
+    "poll.ts",
+    "commands.ts",
+    "compose.ts",
+    "docker.ts",
+    "logs.ts",
+    "types.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "check": "node --experimental-strip-types scripts/check-parser.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.0.20",
+    "@opencode/theme": "^2.0.20",
+    "@opentui/core": ">=0.5.8",
+    "@opentui/solid": ">=0.5.8",
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
     "@opencode/plugin": "^2.0.20",
