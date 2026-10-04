@@ -3,7 +3,7 @@ import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
 import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs } from "./commands.ts"
-import { findComposeFile, resolveComposeTarget, type ComposeTarget } from "./compose.ts"
+import { findComposeFile, type ComposeTarget } from "./compose.ts"
 import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
 import { createDockerPolling, selectRows } from "./poll.ts"
 import type { Container, ContainerAction } from "./types.ts"
@@ -108,7 +108,6 @@ export function DockerPanel(props: {
   ui: Plugin.Context["ui"]
   reload: () => void
 }) {
-  const polling = createDockerPolling(props.intervalMs, props.reload)
   const [open, setOpen] = createSignal(true)
   const [busy, setBusy] = createSignal(false)
   const [logs, setLogs] = createSignal<{ name: string; result: LogResult | null } | null>(null)
@@ -163,17 +162,21 @@ export function DockerPanel(props: {
     if (logs()) props.ui.dialog.clear()
   })
 
-  // The compose file is read synchronously and the slot repaints on every poll, so read it once per
-  // render instead of once per mention: the footer and the label below it must not disagree.
-  let cachedDir = props.agentDir
-  let cachedStack: ComposeTarget | null = findComposeFile(props.agentDir)
-  const stackFile = () => {
-    if (props.agentDir !== cachedDir) {
-      cachedDir = props.agentDir
-      cachedStack = findComposeFile(props.agentDir)
-    }
-    return cachedStack
+  // Read the compose file when the panel mounts and again on every poll, never while the host is
+  // assembling the render tree.
+  const [stackSignal, setStackSignal] = createSignal<ComposeTarget | null>(null)
+  const [pendingStack, setPendingStack] = createSignal<ComposeTarget | null>(null)
+  const derivePendingStack = (stack: ComposeTarget | null) => {
+    setPendingStack(
+      stack && !polling.state().containers.some((item) => item.composeProject === stack.project) ? stack : null,
+    )
   }
+  const refreshStack = () => {
+    const stack = findComposeFile(props.agentDir)
+    setStackSignal(stack)
+    derivePendingStack(stack)
+  }
+  const polling = createDockerPolling(props.intervalMs, props.reload, refreshStack)
 
   /** One entry point for every action, so the busy guard and the refresh cannot be forgotten. */
   const run = async (action: ContainerAction, title: string, args: readonly string[]) => {
@@ -189,12 +192,11 @@ export function DockerPanel(props: {
     await polling.refreshAfterAction()
   }
 
-  /** The stack the agent directory declares, but only while none of its containers is on the machine. */
-  const unstartedStack = () => {
-    const stack = stackFile()
-    if (!stack) return null
-    return polling.state().containers.some((item) => item.composeProject === stack.project) ? null : stack
-  }
+  /**
+   * The stack the agent directory declares, but only while none of its containers is on the machine.
+   * Computed once per poll instead of inside the markup: a `Show` and its own label both read this,
+   * and re-deriving it during render is what the crash traced back to.
+   */
 
   /** The list of every container, from which picking one opens the same actions as its row does. */
   const pickContainer = async (all: readonly Container[]) => {
@@ -234,7 +236,7 @@ export function DockerPanel(props: {
    */
   const openStack = async () => {
     if (busy()) return
-    const stack = unstartedStack()
+    const stack = pendingStack()
     if (!stack) return
     const confirmed = await props.ui.dialog.confirm({
       title: `Up ${stack.project}?`,
@@ -249,7 +251,7 @@ export function DockerPanel(props: {
     if (busy()) return
     const isPinned = props.pinned.includes(container.name)
     // Read once per menu: compose can build images, so the action must not wait on a second read.
-    const stack = resolveComposeTarget(props.agentDir, container.composeProject ?? "")
+    const stack = stackSignal()?.project === container.composeProject ? stackSignal() : null
     const options = [
       ...availableActions(container, stack).map((item) => ({
         title: ACTION_LABEL[item],
@@ -375,10 +377,10 @@ export function DockerPanel(props: {
         </Show>
       </Show>
 
-      <Show when={unstartedStack()}>
+      <Show when={pendingStack()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
           <b>Up stack</b>
-          <span style={{ fg: theme().text.muted }}> · {unstartedStack()?.project} is not running here</span>
+          <span style={{ fg: theme().text.muted }}> · {pendingStack()?.project} is not running here</span>
         </text>
       </Show>
     </box>

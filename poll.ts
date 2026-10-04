@@ -41,7 +41,7 @@ function signature(containers: Container[]): string {
 /** A container in a crash loop changes state on every poll, and each remount costs a fresh docker ps. */
 const RELOAD_COOLDOWN_MS = 10000
 
-export function createDockerPolling(intervalMs: number, onContentChange: () => void): DockerPolling {
+export function createDockerPolling(intervalMs: number, onContentChange: () => void, onPoll?: () => void): DockerPolling {
   const [state, setState] = createSignal<DockerState>(INITIAL)
   let timer: ReturnType<typeof setTimeout> | undefined
   let settle: ReturnType<typeof setTimeout> | undefined
@@ -55,6 +55,7 @@ export function createDockerPolling(intervalMs: number, onContentChange: () => v
     if (disposed) return
     const visible = keepContainers(state().containers, next)
     setState({ ...next, containers: visible })
+    onPoll?.()
     if (next.kind === "unavailable" || next.kind === "stale") return
     const current = signature(visible)
     if (current === last) return
