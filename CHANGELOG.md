@@ -1,11 +1,24 @@
 # Changelog
 
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
-that commit; `npm` has no releases yet, so nothing here has been published.
+that commit.
+
+## 0.4.8 - 2026-10-04
+
+- The package now ships precompiled ESM: `npm run build` transpiles the sources with the same
+  Solid options OpenTUI's own transform uses, and `exports["./tui"]` points at `dist/tui.js`
+- `react` dropped: the panel never imported it, and the host rewrites `@opentui/solid` and
+  `solid-js` to its own runtime when a package under `node_modules` ships JavaScript
+- Peer dependencies stay optional, so npm never writes a second Solid or OpenTUI copy next to
+  the plugin
+- `check-build` verifies the built entry imports, claims `sidebar.content`, and releases it on
+  cleanup
+
+## 0.4.1 — 2026-10-04
+
+- `react` added to peer dependencies, so the panel loads from npm
 
 ## 0.4.0 — 2026-10-04
-
-Branch `compose-stack`, not yet merged.
 
 - Sidebar draws running containers only, at most five, with the header opening the full list
 - `Pin` and `Unpin` per container, stored by the host and surviving a TUI restart

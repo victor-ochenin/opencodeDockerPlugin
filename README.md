@@ -20,7 +20,6 @@ The panel appends itself to the `sidebar.content` slot, polls `docker ps --all -
 - [Install](#install)
   - [Option A: let an LLM do it](#option-a-let-an-llm-do-it)
   - [Option B: manual setup](#option-b-manual-setup)
-  - [Once the package is on npm](#once-the-package-is-on-npm)
   - [Verification](#verification)
 - [Options](#options)
 - [Known limits](#known-limits)
@@ -106,8 +105,6 @@ The panel's own strings are English only; the documentation is bilingual.
 
 ## Install
 
-The package is not published on npm yet, so copying the files is the working path today. The `cli.json` entry is required either way.
-
 ### Option A: let an LLM do it
 
 Paste this into any agent (Claude Code, OpenCode, Cursor, and so on):
@@ -119,34 +116,7 @@ https://github.com/victor-ochenin/opencodeDockerPlugin#installation
 
 ### Option B: manual setup
 
-Copy the plugin files into the OpenCode config directory. On Windows that is `%USERPROFILE%\.config\opencode\plugins\docker-panel\`.
-
-```powershell
-$src = "path\to\opencodeDockerPlugin"
-$dst = "$HOME\.config\opencode\plugins\docker-panel"
-New-Item -ItemType Directory -Force -Path $dst | Out-Null
-Copy-Item "$src\*.ts","$src\*.tsx","$src\package.json" -Destination $dst -Force
-```
-
-Then add it to `~/.config/opencode/cli.json`. Create the file if it does not exist and keep whatever is already in it.
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": [{ "package": "./plugins/docker-panel", "options": { "intervalMs": 3000 } }]
-}
-```
-
-Two things trip people up here, so they are worth stating plainly:
-
-- **It goes in `cli.json`, not `opencode.json`.** This is a terminal-only plugin: it draws in the sidebar, and `cli.json` is the file the terminal client reads.
-- **There is no login step and no provider to configure.** It talks to the local `docker` CLI and nothing else.
-
-Restart the TUI afterwards.
-
-### Once the package is on npm
-
-After publication the same entry with a package name replaces the path, and there is nothing to copy:
+Add the plugin to `~/.config/opencode/cli.json`. Create the file if it does not exist and keep whatever is already in it.
 
 ```jsonc
 {
@@ -155,7 +125,14 @@ After publication the same entry with a package name replaces the path, and ther
 }
 ```
 
-The package ships TypeScript sources and OpenCode resolves them at runtime, so there is no build step. `solid-js`, the OpenTUI packages and the OpenCode SDK are peer dependencies rather than hard dependencies, so a second copy of the SDK cannot shadow the one the host is running.
+Two things trip people up here, so they are worth stating plainly:
+
+- **It goes in `cli.json`, not `opencode.json`.** This is a terminal-only plugin: it draws in the sidebar, and `cli.json` is the file the terminal client reads.
+- **There is no login step and no provider to configure.** It talks to the local `docker` CLI and nothing else.
+
+Restart the TUI afterwards. The host installs the package on the next start; nothing to copy and nothing to build.
+
+Pin a version when you want a known state: `{ "package": "opencode-docker-panel@0.4.8" }`.
 
 ### Verification
 
@@ -186,11 +163,12 @@ If the header never appears, the plugin did not load: check that the entry is in
 - `Up stack` only ever starts a stack whose compose file sits in the agent directory. A project that was created somewhere else can still be torn down with `Down`, but it can only be started with `Start` on a single container.
 - `Up stack` may stay hidden when the compose file declares its project in a form the panel cannot read, such as an indented `name:` or a quoted value. That is a refusal rather than a wrong stack.
 - Actions are mouse-only; the plugin registers no keymap layer.
+- The npm package ships precompiled ESM, not TypeScript sources. OpenCode transforms plugin sources with OpenTUI's Solid transform, which skips every path under `node_modules`, so a plugin installed from npm has to arrive as JavaScript or Bun compiles its JSX against React instead. Do not ship `.tsx`.
+- `solid-js`, the OpenTUI packages and the OpenCode SDK are optional peers. npm therefore never writes a second copy of them next to the plugin, which is what the host rewrites its own imports to. Making them hard dependencies puts a second Solid runtime on disk and breaks rendering.
 
 ## Changelog
 
-Versions and dates are in [CHANGELOG.md](CHANGELOG.md). Nothing is on npm yet, so there are no
-published releases to install by version.
+Versions and dates are in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
