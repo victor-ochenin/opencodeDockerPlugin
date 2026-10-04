@@ -10,6 +10,23 @@ The panel appends itself to the `sidebar.content` slot, polls `docker ps --all -
 
 ![The Docker panel in the session sidebar, a container action dialog and the log view](docs/demo.gif)
 
+## Contents
+
+- [What it does](#what-it-does)
+- [Logs](#logs)
+- [What it shows](#what-it-shows)
+- [Requirements](#requirements)
+- [Layout](#layout)
+- [Install](#install)
+  - [Option A: let an LLM do it](#option-a-let-an-llm-do-it)
+  - [Option B: manual setup](#option-b-manual-setup)
+  - [Until the package is on npm](#until-the-package-is-on-npm)
+  - [Verification](#verification)
+- [Options](#options)
+- [Checks](#checks)
+- [Known limits](#known-limits)
+- [License](#license)
+
 ## What it does
 
 ```text
@@ -71,7 +88,7 @@ A missing or stopped Docker is a normal state, not a plugin failure, so it is re
 
 - OpenCode 2 runtime with plugin slots (`opencode2`)
 - `docker` on `PATH`: Docker Desktop on Windows, Docker Engine on Linux and macOS
-- Node.js 22 or newer for the parser check
+- Node.js 22 or newer only for the repository checks, not to run the plugin
 
 ## Layout
 
@@ -95,13 +112,36 @@ The panel strings are English only; the docs are bilingual. The package is not i
 
 ## Install
 
-Copy the files into the OpenCode config directory:
+### Option A: let an LLM do it
+
+Paste this into any agent (Claude Code, OpenCode, Cursor, and so on):
 
 ```text
-~/.config/opencode/plugins/docker-panel/
+Install the opencode-docker-panel Docker sidebar plugin by following
+https://github.com/victor-ochenin/opencodeDockerPlugin#installation
 ```
 
-On Windows that is `%USERPROFILE%\.config\opencode\plugins\docker-panel\`.
+### Option B: manual setup
+
+Add the plugin to `~/.config/opencode/cli.json`. Create the file if it does not exist and keep whatever is already in it.
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }]
+}
+```
+
+Two things trip people up here, so they are worth stating plainly:
+
+- **It goes in `cli.json`, not `opencode.json`.** This is a terminal-only plugin: it draws in the sidebar, and `cli.json` is the file the terminal client reads.
+- **There is no login step and no provider to configure.** It talks to the local `docker` CLI and nothing else.
+
+Restart the TUI afterwards.
+
+### Until the package is on npm
+
+The package is not published yet, so the line above will not resolve. Until it is, copy the files and point the entry at the folder instead.
 
 ```powershell
 $src = "path\to\opencodeDockerPlugin"
@@ -110,8 +150,6 @@ New-Item -ItemType Directory -Force -Path $dst | Out-Null
 Copy-Item "$src\*.ts","$src\*.tsx","$src\package.json" -Destination $dst -Force
 ```
 
-Register it in `cli.json`, otherwise the CLI has no entry to load:
-
 ```jsonc
 {
   "$schema": "https://opencode.ai/v2/cli.json",
@@ -119,7 +157,18 @@ Register it in `cli.json`, otherwise the CLI has no entry to load:
 }
 ```
 
-Restart the TUI afterwards.
+### Verification
+
+There is no CLI check for this one: the plugin draws in the terminal UI, so `opencode run` will never show it. Verify in the TUI.
+
+1. `docker ps` returns at least one container. If it fails, the panel has nothing to draw and says so.
+2. Restart the TUI and open a session.
+3. The sidebar gets a `Docker` header with a container count. Running containers appear as rows, at most five of them, with a `N more, click for all` line under them when something is still hidden.
+4. Click `Docker` to get the full list, then click a container to get its actions menu.
+
+If the header never appears, the plugin did not load: check that the entry is in `cli.json` under `plugins`, and check `~/.local/share/opencode/log/opencode.log` for a load error.
+
+Once published, the package ships TypeScript sources and OpenCode resolves them at runtime, so there is no build step. `solid-js`, the OpenTUI packages and the OpenCode SDK are peer dependencies rather than hard dependencies, so a second copy of the SDK cannot shadow the one the host is running.
 
 ## Options
 
@@ -127,7 +176,7 @@ Restart the TUI afterwards.
 |---|---|---|
 | `intervalMs` | `3000` | Poll interval, clamped to 1000..60000 |
 
-## Verification
+## Checks
 
 ```sh
 npm run check
@@ -139,7 +188,7 @@ fixture: 3 containers -> chroma:running, postgres:running, worker-old:exited
 live: kind=ok detail=- containers=2
 ```
 
-The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, compose label extraction, the exact command line built for every action, which actions each state offers, the clamping of the row limit and the polling rule that a failed poll keeps the last rows. It then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for everything except that last line.
+The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, compose label extraction, the exact command line built for every action, which actions each state offers, which containers get a row, and the polling rule that a failed poll keeps the last rows. It then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for everything except that last line.
 
 Type checking:
 
