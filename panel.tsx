@@ -4,14 +4,13 @@ import type { ResolvedTheme } from "@opencode/theme/tui"
 
 import { ACTION_LABEL, availableActions, buildArgs, runContainerCommand, type CommandResult } from "./commands.ts"
 import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
-import { createDockerPolling } from "./poll.ts"
+import { createDockerPolling, selectRows } from "./poll.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
-const MAX_ROWS = 10
 const LOG_VIEW_LINES = 15
 const LOG_REFRESH_MS = 2000
 
-type MenuChoice = ContainerAction | "logs"
+type MenuChoice = ContainerAction | "logs" | "pin"
 
 interface ScrollEvent {
   readonly scroll?: { readonly direction: string; readonly delta: number }
@@ -30,9 +29,9 @@ function levelColor(theme: ResolvedTheme, level: LogLevel) {
   return theme.text.muted
 }
 
-function detailLabel(container: Container): string {
+function detailLabel(container: Container, pinned: string[]): string {
   const base = container.ports.length > 0 ? container.ports.join("  ") : container.status || container.image
-  return container.composeProject ? `${base} · ${container.composeProject}` : base
+  return [base, container.composeProject, pinned.includes(container.name) ? "pinned" : ""].filter(Boolean).join(" · ")
 }
 
 function hasStaleRows(state: { kind: string; containers: Container[] }): boolean {
@@ -96,6 +95,8 @@ function LogsView(props: {
 
 export function DockerPanel(props: {
   intervalMs: number
+  pinned: string[]
+  onTogglePin: (name: string) => Promise<void>
   theme: ResolvedTheme
   ui: Plugin.Context["ui"]
   reload: () => void
@@ -174,30 +175,40 @@ export function DockerPanel(props: {
 
   const openMenu = async (container: Container) => {
     if (busy()) return
-    const actions = availableActions(container)
-    if (actions.length === 0) return
+    const isPinned = props.pinned.includes(container.name)
+    const options = [
+      ...availableActions(container).map((item) => ({
+        title: ACTION_LABEL[item],
+        value: item as MenuChoice,
+        description: item === "down" ? `stops every container of ${container.composeProject}` : container.status,
+        footer: buildArgs(item, container).join(" "),
+      })),
+      {
+        title: "Logs",
+        value: "logs" as MenuChoice,
+        description: "read the last 200 log lines in the sidebar",
+        footer: `docker logs --tail 200 -- ${container.name}`,
+      },
+      {
+        title: isPinned ? "Unpin" : "Pin",
+        value: "pin" as MenuChoice,
+        description: isPinned ? "put this container back under the row limit" : "keep this container visible whatever the limit",
+        footer: "stored by the host, survives a restart",
+      },
+    ]
     try {
-      const choice = await props.ui.dialog.select<MenuChoice>({
-        title: container.name,
-        placeholder: "Action",
-        options: [
-          ...actions.map((item) => ({
-            title: ACTION_LABEL[item],
-            value: item as MenuChoice,
-            description: item === "down" ? `stops every container of ${container.composeProject}` : container.status,
-            footer: buildArgs(item, container).join(" "),
-          })),
-          {
-            title: "Logs",
-            value: "logs" as MenuChoice,
-            description: "read the last 200 log lines in the sidebar",
-            footer: `docker logs --tail 200 -- ${container.name}`,
-          },
-        ],
-      })
+      const choice = await props.ui.dialog.select<MenuChoice>({ title: container.name, placeholder: "Action", options })
       if (!choice) return
       if (choice === "logs") {
         openLogs(container)
+        return
+      }
+      if (choice === "pin") {
+        await props.onTogglePin(container.name)
+        props.ui.toast.show({
+          title: container.name,
+          message: isPinned ? "Unpinned: back under the row limit" : "Pinned: shown whatever the row limit",
+        })
         return
       }
       if (choice === "down") {
@@ -220,20 +231,55 @@ export function DockerPanel(props: {
   }
 
   // A click in opentui is a mousedown plus a mouseup, and the host dismisses an overlay from the
-  // next mouse event it sees. The menu is therefore armed on the release, and only mounted after
+  // next mouse event it sees. Every dialog is therefore armed on the release, and only mounted after
   // that release has finished propagating, so the release cannot land on its own backdrop.
-  const armMenu = (container: Container, event: { stopPropagation: () => void }) => {
+  const arm = (open: () => void, event: { stopPropagation: () => void }) => {
     event.stopPropagation()
-    setTimeout(() => void openMenu(container), 0)
+    setTimeout(() => void open(), 0)
+  }
+
+  /** With rows under it the header collapses them; with nothing to show it is the only door to the stopped ones. */
+  const openAll = async () => {
+    if (busy()) return
+    const all = polling.state().containers
+    if (all.length === 0) return
+    const choice = await props.ui.dialog.select<Container>({
+      title: `All containers (${all.length})`,
+      placeholder: "Container",
+      options: all.map((container) => ({
+        title: container.name,
+        value: container,
+        description: detailLabel(container, props.pinned),
+        footer: container.state,
+      })),
+    })
+    if (!choice) return
+    // The list is a snapshot: a container can stop while it is open, so re-read it before offering actions.
+    const fresh = polling.state().containers.find((item) => item.name === choice.name)
+    if (fresh) await openMenu(fresh)
+  }
+
+  const rows = () => selectRows(polling.state().containers, props.pinned)
+  const hasRows = () => rows().length > 0
+
+  const pressHeader = () => {
+    if (hasRows()) {
+      setOpen((value) => !value)
+      return
+    }
+    void openAll()
   }
 
   return (
     <box>
-      <box flexDirection="row" gap={1} onMouseDown={() => setOpen((value) => !value)}>
+      <box flexDirection="row" gap={1} onMouseUp={(event) => arm(pressHeader, event)}>
         <text fg={theme().text.base}>
           <b>Docker</b>
           <Show when={polling.state().containers.length > 0}>
             <span style={{ fg: theme().text.muted }}> ({polling.state().containers.length})</span>
+          </Show>
+          <Show when={!hasRows() && polling.state().containers.length > 0}>
+            <span style={{ fg: theme().text.muted }}> click for all</span>
           </Show>
         </text>
         <Show when={hasStaleRows(polling.state())}>
@@ -249,21 +295,24 @@ export function DockerPanel(props: {
       </Show>
 
       <Show when={polling.state().containers.length > 0 && open()}>
-        <Index each={polling.state().containers.slice(0, MAX_ROWS)}>
+        <Index each={rows()}>
           {(container) => (
-            <box flexDirection="row" gap={1} onMouseUp={(event) => armMenu(container(), event)}>
+            <box flexDirection="row" gap={1} onMouseUp={(event) => arm(() => openMenu(container()), event)}>
               <text flexShrink={0} fg={dotColor(theme(), container().state)}>
                 •
               </text>
               <text fg={theme().text.base} wrapMode="word">
                 {container().name}{" "}
-                <span style={{ fg: theme().text.muted }}>{detailLabel(container())}</span>
+                <span style={{ fg: theme().text.muted }}>{detailLabel(container(), props.pinned)}</span>
               </text>
             </box>
           )}
         </Index>
-        <Show when={polling.state().containers.length > MAX_ROWS}>
-          <text fg={theme().text.muted}> {polling.state().containers.length - MAX_ROWS} more</text>
+        <Show when={hasRows() && polling.state().containers.length > rows().length}>
+          <text fg={theme().text.muted} onMouseUp={(event) => arm(openAll, event)}>
+            {" "}
+            {polling.state().containers.length - rows().length} more, click for all
+          </text>
         </Show>
       </Show>
     </box>

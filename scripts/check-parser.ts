@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
 import { availableActions, buildArgs } from "../commands.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
-import { keepContainers } from "../poll.ts"
+import { keepContainers, selectRows } from "../poll.ts"
 import type { Container, DockerState } from "../types.ts"
 
 const fixturePath = fileURLToPath(new URL("../fixtures/docker-ps.jsonl", import.meta.url))
@@ -119,6 +119,38 @@ const ok: DockerState = { kind: "empty", containers: [], detail: "no containers"
 assert.equal(keepContainers(previous, ok).length, 0, "a successful empty poll must not resurrect old rows")
 assert.equal(keepContainers(previous, { kind: "stale", containers: [], detail: "docker did not respond" }), previous)
 assert.equal(keepContainers(previous, { kind: "unavailable", containers: [], detail: "boom" }), previous)
+
+const named = (name: string, state: string): Container => ({
+  name,
+  image: "img",
+  state,
+  status: state,
+  ports: [],
+  createdAt: 0,
+})
+// docker.ts already sorts running first, so the fixtures have to arrive in that order for the checks to mean anything.
+const busyHost = Array.from({ length: 12 }, (_, index) => named(`live-${index}`, "running"))
+const quietHost = [named("old-a", "exited"), named("old-b", "dead"), named("old-c", "created")]
+
+assert.deepEqual(
+  selectRows(busyHost, []).map((item) => item.name),
+  ["live-0", "live-1", "live-2", "live-3", "live-4"],
+  "at most five running containers get a row, the first five in docker order",
+)
+assert.deepEqual(selectRows(quietHost, []), [], "a stopped container gets no row while nothing runs")
+assert.deepEqual(
+  selectRows(quietHost, ["old-c"]).map((item) => item.name),
+  ["old-c"],
+  "a pinned stopped container is the one row there is",
+)
+assert.equal(selectRows(quietHost, ["old-a", "old-b", "old-c"]).length, 3, "pinning beats the five row budget")
+assert.equal(
+  selectRows(busyHost, ["live-9"]).length,
+  5,
+  "a pinned running container spends the budget instead of adding a sixth row",
+)
+assert.equal(selectRows(busyHost, ["live-9"])[0]?.name, "live-9", "pinned rows come before the running ones")
+assert.deepEqual(selectRows(quietHost, ["gone"]), [], "a pin for a container that no longer exists is ignored")
 
 const live = await runDockerPs()
 assert.ok(["ok", "empty", "unavailable", "stale"].includes(live.kind), `unexpected live status: ${live.kind}`)

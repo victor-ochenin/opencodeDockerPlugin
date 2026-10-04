@@ -13,6 +13,20 @@ export function keepContainers(previous: Container[], next: DockerState): Contai
   return next.containers
 }
 
+/** The sidebar belongs to what runs right now, so it shows five running containers and nothing else. */
+export const MAX_RUNNING = 5
+
+/**
+ * A pinned container is shown whatever its state, and spends the running budget when it happens to run,
+ * so pinning everything shows everything. Stopped containers get no row: the dialog is their only door.
+ */
+export function selectRows(all: Container[], pinned: string[]): Container[] {
+  const isPinned = (item: Container) => pinned.includes(item.name)
+  const fixed = all.filter(isPinned)
+  const running = all.filter((item) => !isPinned(item) && item.state === "running")
+  return [...fixed, ...running.slice(0, Math.max(0, MAX_RUNNING - fixed.length))]
+}
+
 export interface DockerPolling {
   readonly state: () => DockerState
   readonly refresh: () => Promise<void>

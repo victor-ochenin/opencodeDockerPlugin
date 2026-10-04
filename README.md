@@ -52,7 +52,9 @@ Docker (3)
 • worker-old   Exited (0) 2 days ago
 ```
 
-The dot is colored by container state: green for `running`, yellow for `paused` and `restarting`, muted for everything else. Running containers sort first, then newest `CreatedAt`, so the list does not jump between polls. More than ten rows are truncated with an `N more` line. Clicking the header collapses and expands the list.
+The dot is colored by container state: green for `running`, yellow for `paused` and `restarting`, muted for everything else. Running containers sort first, then newest `CreatedAt`, so the list does not jump between polls. The panel draws running containers and nothing else: at most five rows, the first five in the order docker reports them. Stopped containers never get a row of their own, so the header is the only way into them. The header has two jobs and says which one it is: when there is nothing to show it is marked `click for all` and opens a dialog with every container; when there are rows, that marker is gone and the header collapses and expands them instead. Picking a container in the dialog opens the same actions as a click on its row. A `N more, click for all` line appears under the rows, and only when there are rows to put it under, whenever something is still hidden. The header also shows `stale` when docker stopped answering and `working` while an action runs.
+
+`Pin` in a container's menu keeps that container visible whatever its state, and it spends the five row budget when it happens to run, so pinning everything shows everything. A pin is stored by the host, so it survives a TUI restart and applies to every session; `Unpin` in the same menu drops it. Pinned rows are marked `pinned` next to their ports and project.
 
 | State | Panel output |
 |---|---|
@@ -80,7 +82,7 @@ poll.ts       polling loop: owns the last known rows and the refresh timer
 commands.ts   builds and runs the lifecycle commands
 logs.ts       reads, sanitises and orders container log lines
 docker.ts     runs docker ps, parses and sorts the output
-types.ts      container and state types
+types.ts      container and state types, option clamping
 scripts/      parser and command checks
 fixtures/     captured docker ps output used by the check
 ```
@@ -137,7 +139,7 @@ fixture: 3 containers -> chroma:running, postgres:running, worker-old:exited
 live: kind=ok detail=- containers=2
 ```
 
-The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, compose label extraction, the exact command line built for every action, which actions each state offers, and the polling rule that a failed poll keeps the last rows. It then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for everything except that last line.
+The check asserts ordering, port splitting, name normalisation and tolerance to broken lines against the fixture, compose label extraction, the exact command line built for every action, which actions each state offers, the clamping of the row limit and the polling rule that a failed poll keeps the last rows. It then performs one live `docker ps` call and prints its state. It needs neither Docker nor OpenCode to be running for everything except that last line.
 
 Type checking:
 
@@ -153,7 +155,8 @@ Type checking is also how the plugin is validated against the host: `@opencode/p
 - OpenCode 2 is in beta, so slot names and theme tokens may change; that surfaces as a type error rather than a runtime surprise.
 - The host does not repaint a slot when only a reactive value changes, so the panel is remounted through a fresh slot claim whenever the container list really changes, at most once every ten seconds. That is a workaround, and it resets the collapsed state and closes an open log view; the underlying repaint gap belongs to the host.
 - The poll spawns `docker ps` on an interval. On a host with hundreds of containers, raise `intervalMs` to 5000 or higher.
-- Rows are capped at ten with an `N more` line and there is no scrolling, which suits a sidebar but not a real container list.
+- At most five running containers get a row, and the five is a constant rather than an option: a host with thirty containers shows five and leaves the rest to the dialog. Pinning is the only way to promote a sixth.
+- The sidebar itself cannot scroll, so the containers past the five live in the dialog rather than in the panel.
 - No exec, no volume or image actions, no restart history. `Down` is offered per container but acts on the whole compose project. The log view is a fixed window over the last 200 lines with no history beyond that.
 - Actions are mouse-only; the plugin registers no keymap layer.
 

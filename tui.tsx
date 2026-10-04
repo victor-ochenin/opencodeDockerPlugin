@@ -10,7 +10,17 @@ const plugin: Plugin.Definition = {
   setup(context) {
     const requested = Number(context.options.intervalMs)
     const intervalMs = Number.isFinite(requested) ? Math.min(Math.max(requested, MIN_INTERVAL), MAX_INTERVAL) : 3000
+    const [pinned, setPinned] = context.storage.store("docker-panel.pinned", { initial: { names: [] as string[] } })
     let dispose: (() => void) | undefined
+
+    /** Durable storage is the host's own, so a pin outlives the TUI without this plugin owning any user file. */
+    async function togglePin(name: string): Promise<void> {
+      await setPinned((draft) => {
+        const index = draft.names.indexOf(name)
+        if (index >= 0) draft.names.splice(index, 1)
+        else draft.names.push(name)
+      })
+    }
 
     /** Drops the current claim and registers it again, which is the only way to make the host paint the slot anew. */
     function reload() {
@@ -22,7 +32,16 @@ const plugin: Plugin.Definition = {
 
     const claim = {
       append: "sidebar.content",
-      render: () => <DockerPanel intervalMs={intervalMs} theme={context.theme} ui={context.ui} reload={reload} />,
+      render: () => (
+        <DockerPanel
+          intervalMs={intervalMs}
+          pinned={pinned.names}
+          onTogglePin={togglePin}
+          theme={context.theme}
+          ui={context.ui}
+          reload={reload}
+        />
+      ),
     } as const
 
     dispose = context.ui.slot(claim)
