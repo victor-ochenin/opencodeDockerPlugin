@@ -9,7 +9,7 @@ const INITIAL: DockerState = { kind: "empty", containers: [], detail: "loading" 
 const SETTLE_MS = 1200
 
 export function keepContainers(previous: Container[], next: DockerState): Container[] {
-  if (next.kind === "unavailable" || next.kind === "stale") return previous
+  if (next.kind === "unavailable" || next.kind === "stale" || next.kind === "stopped") return previous
   return next.containers
 }
 

@@ -44,7 +44,7 @@ Up stack · storefront is not running here
 |---|---|
 | Docker работает, есть контейнеры | `Docker (N)` и по строке на контейнер |
 | Docker работает, контейнеров нет | `no containers` |
-| Docker Desktop не запущен | `docker desktop not running` |
+| Docker Desktop не запущен | `engine not running` |
 | Docker не установлен | `docker not installed` |
 | `docker ps` не ответил вовремя | последние известные строки с пометкой `stale` |
 | Нет прав на сокет Docker | `no permission to talk to docker` |

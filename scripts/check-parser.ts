@@ -10,6 +10,13 @@ import { availableActions, buildArgs } from "../commands.ts"
 import { findComposeFile, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { keepContainers, selectRows } from "../poll.ts"
+import {
+  ENGINE_ACTION_LABEL,
+  availableRuntimeActions,
+  buildRuntimeArgs,
+  parseDesktopStatus,
+  runDesktopStatus,
+} from "../runtime.ts"
 import type { Container, DockerState } from "../types.ts"
 
 const fixturePath = fileURLToPath(new URL("../fixtures/docker-ps.jsonl", import.meta.url))
@@ -30,11 +37,61 @@ assert.equal(parseDockerPs(dirty).length, 3, "broken lines are skipped, valid on
 assert.deepEqual(parseDockerPs(""), [], "empty output yields an empty list")
 assert.equal(parseDockerPs('{"Names":"/solo","State":"running"}').length, 1, "minimal record still parses")
 
-assert.equal(shortReason("Cannot find the file specified"), "docker desktop not running")
+assert.equal(shortReason("Cannot find the file specified"), "engine not running")
 assert.equal(shortReason("error during connect: is the server running?"), "no connection to docker")
 assert.equal(shortReason("Got permission denied while trying to connect"), "no permission to talk to docker")
 assert.equal(shortReason(""), "no connection to docker", "empty stderr falls back to a generic reason")
 assert.equal(shortReason("x".repeat(80)).length, 60, "long reasons are truncated with an ellipsis")
+
+// Every string below is a measured `docker desktop status` output, not an invented one
+const STOPPED_STDERR = "Could not retrieve status. Is Docker Desktop running?"
+const STOPPED_STDOUT = "You can start Docker Desktop by running 'docker desktop start'."
+
+assert.equal(parseDesktopStatus(0, "", ""), "running", "exit 0 means the engine answers")
+assert.equal(
+  parseDesktopStatus(1, STOPPED_STDOUT, STOPPED_STDERR),
+  "stopped",
+  "a stopped engine fails with exit 1 and its reason on stderr, it never prints stopped",
+)
+assert.equal(
+  parseDesktopStatus(1, STOPPED_STDOUT, STOPPED_STDERR.toUpperCase()),
+  "stopped",
+  "the wording is matched case-insensitively",
+)
+assert.equal(
+  parseDesktopStatus(125, "", "unknown flag: --nope"),
+  "unknown",
+  "exit 125 is docker's code for an unknown flag, which is not the same as stopped",
+)
+assert.equal(
+  parseDesktopStatus(1, "", 'unable to retrieve the engine list: open \\\\.\\pipe\\dockerBackendApiServer'),
+  "unknown",
+  "engine ls shares exit 1 with status while the engine is down, so exit 1 alone cannot mean stopped",
+)
+assert.equal(
+  parseDesktopStatus(1, "You can start Docker Desktop by running 'docker desktop start'.", "Could not retrieve status."),
+  "stopped",
+  "the affirmative half of the message alone proves the engine is down, without the question",
+)
+assert.equal(
+  parseDesktopStatus(1, "", "docker: 'desktop' is not a docker command.\nSee 'docker --help'"),
+  "absent",
+  "a missing cli plugin is absent, and the check comes before the exit code on purpose",
+)
+assert.equal(parseDesktopStatus(null, "", ""), "unknown", "no docker binary at all is unknown, never stopped")
+assert.equal(parseDesktopStatus(1, "", "permission denied"), "unknown", "a socket refusal is not a stopped engine")
+assert.deepEqual(availableRuntimeActions("stopped"), ["engine-start"])
+assert.deepEqual(availableRuntimeActions("running"), ["engine-stop"])
+assert.deepEqual(availableRuntimeActions("unknown"), [], "an unrecognized state offers nothing to click")
+assert.deepEqual(availableRuntimeActions("absent"), [], "a machine without the plugin gets no button that cannot work")
+assert.deepEqual(buildRuntimeArgs("engine-start"), ["desktop", "start"])
+assert.deepEqual(buildRuntimeArgs("engine-stop"), ["desktop", "stop"])
+assert.equal(ENGINE_ACTION_LABEL["engine-stop"], "Stop Docker Desktop")
+assert.equal(
+  buildRuntimeArgs("engine-stop").includes("--force"),
+  false,
+  "force would bypass the confirmation that an app-level stop has to ask for",
+)
 
 const compose = parseDockerPs(
   '{"Names":"/web","State":"running","Labels":"com.docker.compose.project=socnot,com.docker.compose.service=web,com.docker.compose.oneoff=False"}',
@@ -215,6 +272,16 @@ const ok: DockerState = { kind: "empty", containers: [], detail: "no containers"
 assert.equal(keepContainers(previous, ok).length, 0, "a successful empty poll must not resurrect old rows")
 assert.equal(keepContainers(previous, { kind: "stale", containers: [], detail: "docker did not respond" }), previous)
 assert.equal(keepContainers(previous, { kind: "unavailable", containers: [], detail: "boom" }), previous)
+assert.equal(
+  keepContainers(previous, { kind: "stopped", containers: [], detail: "" }),
+  previous,
+  "a stopped engine leaves the last known rows on screen instead of emptying the panel",
+)
+assert.deepEqual(
+  availableRuntimeActions(parseDesktopStatus(1, STOPPED_STDOUT, STOPPED_STDERR)),
+  ["engine-start"],
+  "the rows survive the stop and the panel offers the way back",
+)
 
 const named = (name: string, state: string): Container => ({
   name,
@@ -256,6 +323,15 @@ assert.deepEqual(
 const live = await runDockerPs()
 assert.ok(["ok", "empty", "unavailable", "stale"].includes(live.kind), `unexpected live status: ${live.kind}`)
 
+// Read-only, like runDockerPs above: it must never start or stop anything, and check runs in CI on Linux too
+const engine = await runDesktopStatus()
+assert.ok(["running", "stopped", "absent", "unknown"].includes(engine), `unexpected engine status: ${engine}`)
+assert.ok(
+  ["running", "stopped", "absent", "unknown"].includes(await runDesktopStatus(1)),
+  "a one millisecond timeout must resolve to a state instead of hanging the checks",
+)
+
 console.log("parser checks passed")
 console.log(`fixture: ${parsed.length} containers -> ${parsed.map((item) => `${item.name}:${item.state}`).join(", ")}`)
 console.log(`live: kind=${live.kind} detail=${live.detail || "-"} containers=${live.containers.length}`)
+console.log(`engine: ${engine} actions=${availableRuntimeActions(engine).join(",") || "-"}`)

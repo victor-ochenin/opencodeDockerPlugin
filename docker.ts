@@ -12,8 +12,9 @@ const COMPOSE_SERVICE = "com.docker.compose.service"
 
 export function shortReason(raw: string): string {
   const text = raw.toLowerCase()
+  // Which program answers for the engine is a question for the runtime probe, so this only says what failed
   if (text.includes("dockerdesktoplinuxengine") || text.includes("cannot find the file specified")) {
-    return "docker desktop not running"
+    return "engine not running"
   }
   if (text.includes("docker_engine") || text.includes("is the server running")) return "no connection to docker"
   if (text.includes("access is denied") || text.includes("permission denied")) return "no permission to talk to docker"

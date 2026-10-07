@@ -90,7 +90,7 @@ The dot is coloured by container state: green for `running`, yellow for `paused`
 |---|---|
 | Docker up with containers | `Docker (N)` plus one row per container |
 | Docker up, nothing created | `no containers` |
-| Docker Desktop not running | `docker desktop not running` |
+| Docker Desktop not running | `engine not running` |
 | Docker not installed | `docker not installed` |
 | `docker ps` timed out | last known rows with a `stale` marker |
 | No permission on the Docker socket | `no permission to talk to docker` |
