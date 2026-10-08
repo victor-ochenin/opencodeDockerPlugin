@@ -87,7 +87,7 @@ export function createEngineProbe(): EngineProbe {
   const waitForRunning = async (deadlineMs: number = ENGINE_DEADLINE_MS): Promise<boolean> => {
     const until = Date.now() + deadlineMs
     for (;;) {
-      if (await refresh() === "running") return true
+      if ((await refresh()) === "running") return true
       if (disposed || Date.now() >= until) return false
       await new Promise((resolve) => setTimeout(resolve, ENGINE_TRANSITION_MS))
     }

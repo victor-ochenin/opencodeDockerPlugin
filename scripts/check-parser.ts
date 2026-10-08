@@ -10,7 +10,13 @@ import { availableActions, buildArgs } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { ENGINE_DEADLINE_MS, ENGINE_TRANSITION_MS, keepContainers, selectRows } from "../poll.ts"
-import { ENGINE_ACTION_LABEL, ENGINE_TIMEOUT_MS, buildRuntimeArgs, parseDesktopStatus, runDesktopStatus } from "../runtime.ts"
+import {
+  ENGINE_ACTION_LABEL,
+  ENGINE_TIMEOUT_MS,
+  buildRuntimeArgs,
+  parseDesktopStatus,
+  runDesktopStatus,
+} from "../runtime.ts"
 import type { Container, DockerState } from "../types.ts"
 
 const fixturePath = fileURLToPath(new URL("../fixtures/docker-ps.jsonl", import.meta.url))
@@ -19,7 +25,11 @@ const fixture = await readFile(fixturePath, "utf8")
 const parsed = parseDockerPs(fixture)
 
 assert.equal(parsed.length, 3, "all three fixture containers must parse")
-assert.deepEqual(parsed.map((item) => item.name), ["chroma", "postgres", "worker-old"], "running first, then newest CreatedAt")
+assert.deepEqual(
+  parsed.map((item) => item.name),
+  ["chroma", "postgres", "worker-old"],
+  "running first, then newest CreatedAt",
+)
 assert.equal(parsed[0]?.ports.length, 2, "chroma exposes two ports")
 assert.equal(parsed[0]?.ports[0], "127.0.0.1:8000")
 assert.equal(parsed[2]?.state, "exited", "exited container is not running")
@@ -31,7 +41,8 @@ assert.equal(parseDockerPs(dirty).length, 3, "broken lines are skipped, valid on
 assert.deepEqual(parseDockerPs(""), [], "empty output yields an empty list")
 assert.equal(parseDockerPs('{"Names":"/solo","State":"running"}').length, 1, "minimal record still parses")
 
-const DESKTOP_PIPE_MISSING = 'error during connect: Get "http://%2F%2F%2F.%2F%2Fpipe%2FdockerDesktopLinuxEngine/v1.51/containers/json?all=1&size=1": open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.'
+const DESKTOP_PIPE_MISSING =
+  'error during connect: Get "http://%2F%2F%2F.%2F%2Fpipe%2FdockerDesktopLinuxEngine/v1.51/containers/json?all=1&size=1": open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.'
 
 assert.equal(isDesktopPipeMissing(DESKTOP_PIPE_MISSING), true, "the measured ps failure of a stopped Desktop")
 assert.equal(
@@ -71,12 +82,16 @@ assert.equal(
   "exit 125 is docker's code for an unknown flag, which is not the same as stopped",
 )
 assert.equal(
-  parseDesktopStatus(1, "", 'unable to retrieve the engine list: open \\\\.\\pipe\\dockerBackendApiServer'),
+  parseDesktopStatus(1, "", "unable to retrieve the engine list: open \\\\.\\pipe\\dockerBackendApiServer"),
   "unknown",
   "engine ls shares exit 1 with status while the engine is down, so exit 1 alone cannot mean stopped",
 )
 assert.equal(
-  parseDesktopStatus(1, "You can start Docker Desktop by running 'docker desktop start'.", "Could not retrieve status."),
+  parseDesktopStatus(
+    1,
+    "You can start Docker Desktop by running 'docker desktop start'.",
+    "Could not retrieve status.",
+  ),
   "stopped",
   "the affirmative half of the message alone proves the engine is down, without the question",
 )
@@ -105,7 +120,9 @@ assert.equal((parseDockerPs('{"Names":"/solo","State":"running"}')[0] as Contain
 
 const CREATED_SECONDS = 1757900000
 const CREATED_AS_DOCKER_DATE = `${new Date(CREATED_SECONDS * 1000).toISOString().slice(0, 19).replace("T", " ")} +0000 UTC`
-const dated = parseDockerPs(`{"Names":"/d","State":"exited","CreatedAt":${JSON.stringify(CREATED_AS_DOCKER_DATE)}}`)[0] as Container
+const dated = parseDockerPs(
+  `{"Names":"/d","State":"exited","CreatedAt":${JSON.stringify(CREATED_AS_DOCKER_DATE)}}`,
+)[0] as Container
 const stamped = parseDockerPs(`{"Names":"/s","State":"exited","CreatedAt":"${CREATED_SECONDS}"}`)[0] as Container
 assert.equal(dated.createdAt, CREATED_SECONDS * 1000, "a date with a trailing zone name parses to milliseconds")
 assert.equal(stamped.createdAt, CREATED_SECONDS * 1000, "a unix timestamp in seconds is scaled to milliseconds")
@@ -114,7 +131,14 @@ assert.ok(
   "an unreadable CreatedAt falls back to zero instead of NaN",
 )
 
-const bare: Container = { name: "lonely", image: "img", state: "running", status: "Up 2 hours", ports: [], createdAt: 0 }
+const bare: Container = {
+  name: "lonely",
+  image: "img",
+  state: "running",
+  status: "Up 2 hours",
+  ports: [],
+  createdAt: 0,
+}
 assert.deepEqual(buildArgs("stop", bare), ["stop", "--", "lonely"], "name is passed after the flag separator")
 assert.deepEqual(buildArgs("restart", compose), ["restart", "--", "web"])
 assert.deepEqual(buildArgs("start", bare), ["start", "--", "lonely"])
@@ -123,7 +147,11 @@ assert.throws(() => buildArgs("down", bare), /no compose project/, "down is refu
 
 assert.deepEqual(availableActions(compose), ["restart", "stop", "down"], "destructive action goes last")
 assert.deepEqual(availableActions(bare), ["restart", "stop"], "no down without a compose project")
-assert.deepEqual(availableActions({ ...bare, state: "exited" }), ["start"], "a bare stopped container can only be started")
+assert.deepEqual(
+  availableActions({ ...bare, state: "exited" }),
+  ["start"],
+  "a bare stopped container can only be started",
+)
 assert.deepEqual(
   availableActions({ ...compose, state: "exited" }),
   ["start", "down"],
@@ -221,7 +249,11 @@ try {
   mkdirSync(shadowed)
   writeFileSync(join(shadowed, "compose.yaml"), "name: someoneelse\nservices: {}\n")
   writeFileSync(join(shadowed, "docker-compose.yml"), "name: shadowed\nservices: {}\n")
-  assert.equal(resolveComposeTarget(shadowed, "shadowed"), null, "a foreign project hides up rather than pointing it elsewhere")
+  assert.equal(
+    resolveComposeTarget(shadowed, "shadowed"),
+    null,
+    "a foreign project hides up rather than pointing it elsewhere",
+  )
   assert.equal(
     findComposeFile(shadowed)?.project,
     "someoneelse",
@@ -243,7 +275,11 @@ try {
   const crlf = join(composeRoot, "crlf")
   mkdirSync(crlf)
   writeFileSync(join(crlf, "compose.yaml"), "name: windows\r\nservices:\r\n  web:\r\n    build: .\r\n")
-  assert.equal(findComposeFile(crlf)?.project, "windows", "CRLF line endings do not leak a carriage return into the name")
+  assert.equal(
+    findComposeFile(crlf)?.project,
+    "windows",
+    "CRLF line endings do not leak a carriage return into the name",
+  )
 
   const neverStarted = join(composeRoot, "never-started")
   mkdirSync(neverStarted)

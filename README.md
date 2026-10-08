@@ -35,7 +35,7 @@ whatever is already in it.
 ```jsonc
 {
   "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }]
+  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }],
 }
 ```
 
@@ -71,10 +71,9 @@ If the header never appears, the plugin did not load: check that the entry is in
 
 ## Options
 
-| Option | Default | Notes |
-|---|---|---|
-| `intervalMs` | `3000` | Poll interval, clamped to 1000..60000 |
-
+| Option       | Default | Notes                                 |
+| ------------ | ------- | ------------------------------------- |
+| `intervalMs` | `3000`  | Poll interval, clamped to 1000..60000 |
 
 Everything else lives in [docs/features.md](docs/features.md).
 

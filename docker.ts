@@ -109,31 +109,36 @@ export function parseDockerPs(stdout: string): Container[] {
 
 export function runDockerPs(timeoutMs: number = TIMEOUT_MS): Promise<DockerState> {
   return new Promise((resolve) => {
-    execFile(COMMAND, ARGS, { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER }, (error, stdout, stderr) => {
-      if (!error) {
-        const containers = parseDockerPs(String(stdout))
+    execFile(
+      COMMAND,
+      ARGS,
+      { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER },
+      (error, stdout, stderr) => {
+        if (!error) {
+          const containers = parseDockerPs(String(stdout))
+          resolve({
+            kind: containers.length > 0 ? "ok" : "empty",
+            containers,
+            detail: containers.length > 0 ? "" : "no containers",
+          })
+          return
+        }
+        const failure = error as { code?: string; killed?: boolean }
+        if (failure.code === "ETIMEDOUT" || failure.killed === true) {
+          resolve({ kind: "stale", containers: [], detail: "docker did not respond" })
+          return
+        }
+        const raw = String(stderr || error.message)
+        if (isDesktopPipeMissing(raw)) {
+          resolve({ kind: "stopped", containers: [], detail: "" })
+          return
+        }
         resolve({
-          kind: containers.length > 0 ? "ok" : "empty",
-          containers,
-          detail: containers.length > 0 ? "" : "no containers",
+          kind: "unavailable",
+          containers: [],
+          detail: failure.code === "ENOENT" ? "docker not installed" : shortReason(raw),
         })
-        return
-      }
-      const failure = error as { code?: string; killed?: boolean }
-      if (failure.code === "ETIMEDOUT" || failure.killed === true) {
-        resolve({ kind: "stale", containers: [], detail: "docker did not respond" })
-        return
-      }
-      const raw = String(stderr || error.message)
-      if (isDesktopPipeMissing(raw)) {
-        resolve({ kind: "stopped", containers: [], detail: "" })
-        return
-      }
-      resolve({
-        kind: "unavailable",
-        containers: [],
-        detail: failure.code === "ENOENT" ? "docker not installed" : shortReason(raw),
-      })
-    })
+      },
+    )
   })
 }

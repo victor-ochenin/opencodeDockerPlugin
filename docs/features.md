@@ -31,14 +31,14 @@ row budget when it happens to run, so pinning everything shows everything. A pin
 host, so it survives a TUI restart and applies to every session; `Unpin` in the same menu drops it.
 Pinned rows are marked `pinned` next to their ports and project.
 
-| State | Panel output |
-|---|---|
-| Docker up with containers | `Docker (N)` plus one row per container |
-| Docker up, nothing created | `no containers` |
-| Docker Desktop not running | a clickable `Start Docker Desktop` line |
-| Docker Desktop CLI plugin missing | no buttons, nothing offered |
-| Docker not installed | `docker not installed`, no buttons |
-| `docker ps` timed out | last known rows with a `stale` marker |
+| State                              | Panel output                                  |
+| ---------------------------------- | --------------------------------------------- |
+| Docker up with containers          | `Docker (N)` plus one row per container       |
+| Docker up, nothing created         | `no containers`                               |
+| Docker Desktop not running         | a clickable `Start Docker Desktop` line       |
+| Docker Desktop CLI plugin missing  | no buttons, nothing offered                   |
+| Docker not installed               | `docker not installed`, no buttons            |
+| `docker ps` timed out              | last known rows with a `stale` marker         |
 | No permission on the Docker socket | `no permission to talk to docker`, no buttons |
 
 A missing or stopped Docker is a normal state, not a plugin failure. A poll that could not reach
@@ -48,19 +48,19 @@ rows go and the panel says so instead of showing containers that are not serving
 
 ## Actions per container state
 
-| Container state | Actions offered |
-|---|---|
-| `running`, `restarting`, `paused` | `Restart`, `Stop`, and `Down` when the container belongs to a compose project |
-| `created`, `exited`, `dead` | `Start`, `Up stack` when the agent directory holds a matching compose file, and `Down` when the container belongs to a compose project |
-| anything else | none |
+| Container state                   | Actions offered                                                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `running`, `restarting`, `paused` | `Restart`, `Stop`, and `Down` when the container belongs to a compose project                                                          |
+| `created`, `exited`, `dead`       | `Start`, `Up stack` when the agent directory holds a matching compose file, and `Down` when the container belongs to a compose project |
+| anything else                     | none                                                                                                                                   |
 
-| Action | Command |
-|---|---|
-| Start | `docker start -- <name>` |
+| Action   | Command                                       |
+| -------- | --------------------------------------------- |
+| Start    | `docker start -- <name>`                      |
 | Up stack | `docker compose -f <file> -p <project> up -d` |
-| Restart | `docker restart -- <name>` |
-| Stop | `docker stop -- <name>` |
-| Down | `docker compose -p <project> down` |
+| Restart  | `docker restart -- <name>`                    |
+| Stop     | `docker stop -- <name>`                       |
+| Down     | `docker compose -p <project> down`            |
 
 `--` is not optional: a container name may start with a dash, and without the separator docker reads
 it as a flag. Every option shows its exact command in the dialog footer, so the destructive one is
@@ -138,10 +138,10 @@ fifteen lines is scrolled with the mouse wheel.
 The panel can start and stop Docker Desktop itself. Both actions go through `docker desktop`, the
 CLI plugin that ships with Docker Desktop.
 
-| Action | Where it lives | Command |
-|---|---|---|
+| Action                 | Where it lives                                            | Command                |
+| ---------------------- | --------------------------------------------------------- | ---------------------- |
 | `Start Docker Desktop` | a line in the sidebar, shown only when Desktop is stopped | `docker desktop start` |
-| `Stop Docker Desktop` | the last entry of the container list | `docker desktop stop` |
+| `Stop Docker Desktop`  | the last entry of the container list                      | `docker desktop stop`  |
 
 ![Starting Docker Desktop](demo3.gif)
 

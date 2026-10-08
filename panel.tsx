@@ -220,7 +220,9 @@ export function DockerPanel(props: {
     await polling.refreshAfterAction()
   }
 
-  type ListChoice = { readonly kind: "container"; readonly container: Container } | { readonly kind: "action"; readonly action: RuntimeAction }
+  type ListChoice =
+    | { readonly kind: "container"; readonly container: Container }
+    | { readonly kind: "action"; readonly action: RuntimeAction }
 
   /**
    * Opens the same actions for a container the sidebar does not show, and carries the one engine
@@ -359,7 +361,9 @@ export function DockerPanel(props: {
       {
         title: isPinned ? "Unpin" : "Pin",
         value: "pin" as MenuChoice,
-        description: isPinned ? "put this container back under the row limit" : "keep this container visible whatever the limit",
+        description: isPinned
+          ? "put this container back under the row limit"
+          : "keep this container visible whatever the limit",
         footer: "stored by the host, survives a restart",
       },
     ]
@@ -398,7 +402,6 @@ export function DockerPanel(props: {
       })
     }
   }
-
 
   // A click in opentui is a mousedown plus a mouseup, and the host dismisses an overlay from the
   // next mouse event it sees, so every dialog is armed on the release and mounted after it propagates
@@ -443,7 +446,10 @@ export function DockerPanel(props: {
       </box>
 
       <Show when={!stopping() && !hasRows() && polling.state().containers.length > 0}>
-        <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}> click for the list</text>
+        <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}>
+          {" "}
+          click for the list
+        </text>
       </Show>
 
       <Show when={engineDown() && !busy()}>
