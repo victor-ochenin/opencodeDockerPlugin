@@ -10,11 +10,25 @@ const MAX_BUFFER = 4 * 1024 * 1024
 const COMPOSE_PROJECT = "com.docker.compose.project"
 const COMPOSE_SERVICE = "com.docker.compose.service"
 
+/**
+ * The Desktop backend owns the named pipe `dockerDesktopLinuxEngine`, and `docker ps` reports it as
+ * missing within about a quarter second, while `docker desktop status` needs four seconds to admit
+ * the same thing. Measured with Desktop stopped: `docker ps` 257 ms, `docker desktop status` 4.4 s.
+ *
+ * The wording is the only evidence here, so it has to name the pipe and its absence together: a bare
+ * `cannot find the file specified` also covers a missing binary and must not be read as a stopped
+ * engine.
+ */
+export function isDesktopPipeMissing(raw: string): boolean {
+  const text = raw.toLowerCase()
+  return (
+    text.includes("dockerdesktoplinuxengine") &&
+    (text.includes("cannot find the file specified") || text.includes("no such file"))
+  )
+}
+
 export function shortReason(raw: string): string {
   const text = raw.toLowerCase()
-  if (text.includes("dockerdesktoplinuxengine") || text.includes("cannot find the file specified")) {
-    return "docker desktop not running"
-  }
   if (text.includes("docker_engine") || text.includes("is the server running")) return "no connection to docker"
   if (text.includes("access is denied") || text.includes("permission denied")) return "no permission to talk to docker"
   const firstLine = raw
@@ -110,10 +124,15 @@ export function runDockerPs(timeoutMs: number = TIMEOUT_MS): Promise<DockerState
         resolve({ kind: "stale", containers: [], detail: "docker did not respond" })
         return
       }
+      const raw = String(stderr || error.message)
+      if (isDesktopPipeMissing(raw)) {
+        resolve({ kind: "stopped", containers: [], detail: "" })
+        return
+      }
       resolve({
         kind: "unavailable",
         containers: [],
-        detail: failure.code === "ENOENT" ? "docker not installed" : shortReason(String(stderr || error.message)),
+        detail: failure.code === "ENOENT" ? "docker not installed" : shortReason(raw),
       })
     })
   })
