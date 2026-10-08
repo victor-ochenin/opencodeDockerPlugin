@@ -1,6 +1,6 @@
 {
   "name": "opencode-docker-panel",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Docker container panel for the OpenCode 2 TUI sidebar",
   "keywords": [
     "opencode",
@@ -35,7 +35,9 @@
     "build": "node --experimental-strip-types scripts/build.ts",
     "check": "node --experimental-strip-types scripts/check-parser.ts",
     "typecheck": "tsc --noEmit",
-    "check-build": "node --experimental-strip-types scripts/check-build.ts"
+    "check-build": "node --experimental-strip-types scripts/check-build.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "peerDependencies": {
     "@opencode/plugin": "^2.0.20",
@@ -70,6 +72,7 @@
     "@opentui/solid": "0.5.12",
     "@types/babel__core": "^7.20.5",
     "babel-preset-solid": "^1.9.12",
+    "prettier": "^3.9.9",
     "solid-js": "1.9.12",
     "typescript": "^5.9.2"
   }

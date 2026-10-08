@@ -33,7 +33,7 @@ https://github.com/victor-ochenin/opencodeDockerPlugin#installation
 ```jsonc
 {
   "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }]
+  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }],
 }
 ```
 
@@ -61,10 +61,9 @@ CLI-проверки у этого плагина нет: он рисуется 
 
 ## Опции
 
-| Опция | По умолчанию | Примечания |
-|---|---|---|
-| `intervalMs` | `3000` | Интервал опроса, ограничивается диапазоном 1000..60000 |
-
+| Опция        | По умолчанию | Примечания                                             |
+| ------------ | ------------ | ------------------------------------------------------ |
+| `intervalMs` | `3000`       | Интервал опроса, ограничивается диапазоном 1000..60000 |
 
 Всё остальное — в [docs/features.ru.md](docs/features.ru.md).
 

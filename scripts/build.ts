@@ -23,13 +23,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const out = join(root, "dist")
 
 /** Same options OpenTUI's own transform uses, so the output matches what the host would produce */
-const presets = [
-  [solidPreset, { moduleName: "@opentui/solid", generate: "universal" }],
-  [typescriptPreset],
-]
+const presets = [[solidPreset, { moduleName: "@opentui/solid", generate: "universal" }], [typescriptPreset]]
 
 /** Sources import each other with explicit extensions, which have to point at the emitted `.js` */
-const rewriteSpecifiers = (code: string) => code.replace(/((?:from|import)\s*["'])(\.{1,2}\/[^"']+?)\.tsx?(["'])/g, "$1$2.js$3")
+const rewriteSpecifiers = (code: string) =>
+  code.replace(/((?:from|import)\s*["'])(\.{1,2}\/[^"']+?)\.tsx?(["'])/g, "$1$2.js$3")
 
 async function build() {
   const entries = (await readdir(root)).filter((name) => name.endsWith(".ts") || name.endsWith(".tsx"))

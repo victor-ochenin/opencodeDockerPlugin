@@ -3,6 +3,13 @@
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
 that commit.
 
+## 0.5.1 - 2026-10-08
+
+- The repository is formatted with prettier, with a config that matches the existing style: no semicolons,
+  a 120 column width, trailing commas everywhere
+- `npm run format` writes, `npm run format:check` only reports
+- Version is bumped because the formatting changes every module and the rebuilt `dist` differs from 0.5.0
+
 ## 0.5.0 - 2026-10-07
 
 - The panel can start and stop Docker Desktop: `Start Docker Desktop` is a clickable line in the
