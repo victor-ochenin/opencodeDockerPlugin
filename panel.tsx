@@ -1,11 +1,12 @@
-import { Index, Show, createSignal, onCleanup } from "solid-js"
+import { Index, Show, createEffect, createSignal, onCleanup } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
 import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs } from "./commands.ts"
 import { findComposeFile, type ComposeTarget } from "./compose.ts"
 import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
-import { createDockerPolling, selectRows } from "./poll.ts"
+import { createDockerPolling, createEngineProbe, selectRows } from "./poll.ts"
+import { ENGINE_ACTION_LABEL, buildRuntimeArgs, type RuntimeAction } from "./runtime.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
 const LOG_VIEW_LINES = 15
@@ -162,12 +163,30 @@ export function DockerPanel(props: {
     if (logs()) props.ui.dialog.clear()
   })
 
+  const engine = createEngineProbe()
+  // The probe only has to be re-read when the poll changes its verdict: an available docker proves the
+  // engine answers, and a probe on every poll would stack several four second calls on the same pipe,
+  // while never re-reading it would leave a stale stopped engine once docker starts from the tray
+  let lastKind = ""
+  const polling = createDockerPolling(props.intervalMs, props.reload, (next) => {
+    refreshStack()
+    if (next.kind === lastKind) return
+    lastKind = next.kind
+    void engine.refresh()
+  })
+
+  // A stop the container poll could see beats a probe that has not answered yet: the poll knows the
+  // Desktop pipe is missing in a quarter second, the probe needs four seconds to admit the same
+  const engineDown = () => polling.state().kind === "stopped" || engine.state() === "stopped"
+
   // Read on mount and on every poll, never while the host assembles the render tree
   const [stackSignal, setStackSignal] = createSignal<ComposeTarget | null>(null)
   const [pendingStack, setPendingStack] = createSignal<ComposeTarget | null>(null)
   const derivePendingStack = (stack: ComposeTarget | null) => {
     setPendingStack(
-      stack && !polling.state().containers.some((item) => item.composeProject === stack.project) ? stack : null,
+      stack && !engineDown() && !polling.state().containers.some((item) => item.composeProject === stack.project)
+        ? stack
+        : null,
     )
   }
   const refreshStack = () => {
@@ -175,7 +194,16 @@ export function DockerPanel(props: {
     setStackSignal(stack)
     derivePendingStack(stack)
   }
-  const polling = createDockerPolling(props.intervalMs, props.reload, refreshStack)
+
+  // A stopped engine makes every `docker logs` call fail, so the window keeps its last lines and the
+  // polling stops rather than spawning a doomed process every two seconds
+  createEffect(() => {
+    const state = engine.state()
+    if (state === "stopped" || state === "absent") {
+      if (logTimer) clearInterval(logTimer)
+      logTimer = undefined
+    }
+  })
 
   /** Single entry point, so the busy guard and the refresh cannot be skipped */
   const run = async (action: ContainerAction, title: string, args: readonly string[]) => {
@@ -191,33 +219,97 @@ export function DockerPanel(props: {
     await polling.refreshAfterAction()
   }
 
-  /** Opens the same actions for a container the sidebar does not show */
+  type ListChoice = { readonly kind: "container"; readonly container: Container } | { readonly kind: "action"; readonly action: RuntimeAction }
+
+  /**
+   * Opens the same actions for a container the sidebar does not show, and carries the one engine
+   * action last.
+   *
+   * The engine entry stays available with no containers at all, because that is exactly when Docker is
+   * down and it is the only way to turn it back on.
+   */
   const pickContainer = async (all: readonly Container[]) => {
-    const choice = await props.ui.dialog.select<Container>({
+    const action = engine.state() === "running" ? ("engine-stop" as RuntimeAction) : undefined
+    const choice = await props.ui.dialog.select<ListChoice>({
       title: `All containers (${all.length})`,
       placeholder: "Container",
-      options: all.map((container) => ({
-        title: container.name,
-        value: container,
-        description: detailLabel(container, props.pinned),
-        footer: container.state,
-      })),
+      options: [
+        ...all.map((container) => ({
+          title: container.name,
+          value: { kind: "container", container } as ListChoice,
+          description: detailLabel(container, props.pinned),
+          footer: container.state,
+        })),
+        ...(action
+          ? [
+              {
+                title: ENGINE_ACTION_LABEL[action],
+                value: { kind: "action", action } as ListChoice,
+                description: "stops every container of every project",
+                footer: `docker ${buildRuntimeArgs(action).join(" ")}`,
+              },
+            ]
+          : []),
+      ],
     })
     if (!choice) return
+    if (choice.kind === "action") {
+      await runRuntime(choice.action)
+      return
+    }
     // The list is a snapshot, a container can stop while it is open, so re-read before acting
-    const fresh = polling.state().containers.find((item) => item.name === choice.name)
+    const fresh = polling.state().containers.find((item) => item.name === choice.container.name)
     if (fresh) await openMenu(fresh)
   }
 
   /** Single door to the containers the sidebar does not show, so the header opens the list itself */
   const openBrowse = async () => {
     if (busy()) return
-    const all = polling.state().containers
-    if (all.length === 0) {
-      props.ui.toast.show({ title: "Docker", message: "no containers", variant: "info" })
-      return
+    await pickContainer(polling.state().containers)
+  }
+
+  /**
+   * Both engine actions ask first, and Stop names what it is about to end.
+   *
+   * Start confirms too: it brings up a virtual machine and starts consuming memory, so a misclick is
+   * not free even though nothing is running that it would interrupt.
+   */
+  const runRuntime = async (action: RuntimeAction) => {
+    if (busy()) return
+    const args = buildRuntimeArgs(action)
+    const title = ENGINE_ACTION_LABEL[action]
+    if (action === "engine-stop") {
+      const running = polling.state().containers.filter((item) => item.state === "running")
+      const names = running.length > 0 ? running.map((item) => item.name).join(", ") : "nothing the panel knows about"
+      const confirmed = await props.ui.dialog.confirm({
+        title: "Stop Docker Desktop?",
+        message: `Stops the engine, so every container stops with it. Visible to the panel: ${names}.\n\nNot reversible from the panel.`,
+        label: { confirm: "Stop", cancel: "Cancel" },
+      })
+      if (!confirmed) return
+    } else {
+      const confirmed = await props.ui.dialog.confirm({
+        title: "Start Docker Desktop?",
+        message: `Brings up the engine and its virtual machine.\n\ndocker ${args.join(" ")}`,
+        label: { confirm: "Start", cancel: "Cancel" },
+      })
+      if (!confirmed) return
     }
-    await pickContainer(all)
+    setBusy(true)
+    try {
+      const result = await runDockerArgs(args)
+      props.ui.toast.show({
+        title,
+        message: result.ok ? `${title}: ${result.message}` : result.message,
+        variant: result.ok ? "success" : "error",
+      })
+      // busy stays on for the whole transition, otherwise working disappears while the VM boots
+      // A command that failed will never bring the engine up, and waiting for one costs two minutes
+      if (action === "engine-start" && result.ok) await engine.waitForRunning()
+      await polling.refreshAfterAction()
+    } finally {
+      setBusy(false)
+    }
   }
 
   /** A stack has no container to act on and its file carries build and command lines, so confirm with the exact argv */
@@ -337,7 +429,14 @@ export function DockerPanel(props: {
         </Show>
       </box>
 
-      <Show when={polling.state().containers.length === 0 && polling.state().detail.length > 0}>
+      <Show when={engineDown() && !busy()}>
+        <text fg={theme().text.base} onMouseUp={(event) => arm(() => void runRuntime("engine-start"), event)}>
+          <b>Start Docker Desktop</b>
+          <span style={{ fg: theme().text.muted }}> · click to start</span>
+        </text>
+      </Show>
+
+      <Show when={!engineDown() && polling.state().containers.length === 0 && polling.state().detail.length > 0}>
         <text fg={theme().text.muted}> {polling.state().detail}</text>
       </Show>
 
@@ -363,7 +462,7 @@ export function DockerPanel(props: {
         </Show>
       </Show>
 
-      <Show when={pendingStack()}>
+      <Show when={pendingStack() && !engineDown()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
           <b>Up stack</b>
           <span style={{ fg: theme().text.muted }}> · {pendingStack()?.project} is not running here</span>

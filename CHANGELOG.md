@@ -3,6 +3,31 @@
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
 that commit.
 
+## 0.5.0 - 2026-10-07
+
+- The panel can start and stop Docker Desktop: `Start Docker Desktop` is a clickable line in the
+  sidebar, `Stop Docker Desktop` is the last entry of the container list and is available even with no
+  containers at all
+- `Stop` confirms first and names the running containers it can see, because an app-level stop ends
+  every container of every project
+- Engine state comes from a `docker desktop status` probe rather than from `docker ps`, which reports a
+  stopped engine as an unavailable socket and cannot tell it apart from a missing CLI
+- The probe waits up to nine seconds: measured, the CLI plugin takes 3.5 to 4.5 seconds to answer when
+  Docker is stopped, and a shorter timeout turned a provable `stopped` into an unknown state with no
+  buttons at all
+- Log polling stops while the engine is down instead of spawning a doomed `docker logs` every two
+  seconds; the window keeps its last lines and does not resume by itself
+- Readme trimmed to install and verification, with the behaviour, the demos and the limits moved to
+  `docs/features.md` and `docs/features.ru.md`
+- Compose project names derived from a directory are normalized the way compose normalizes them, so an
+  uppercase directory like `CarManufacturersMVC` starts as `carmanufacturersmvc` instead of being
+  rejected as an invalid project name
+- A compose project name that compose would reject, or one that normalizes to nothing, no longer
+  offers a button at all
+- A stopped engine is read from `docker ps` failing on a missing `dockerDesktopLinuxEngine` pipe, which
+  takes a quarter of a second instead of the four seconds `docker desktop status` needs, so the
+  `Start Docker Desktop` line shows up right away
+
 ## 0.4.8 - 2026-10-04
 
 - The package now ships precompiled ESM: `npm run build` transpiles the sources with the same

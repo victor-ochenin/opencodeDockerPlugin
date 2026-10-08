@@ -1,12 +1,21 @@
 import { createSignal, onCleanup } from "solid-js"
 
 import { runDockerPs } from "./docker.ts"
+import { runDesktopStatus, type EngineState } from "./runtime.ts"
 import type { Container, DockerState } from "./types.ts"
 
 const INITIAL: DockerState = { kind: "empty", containers: [], detail: "loading" }
 
 /** docker reports the old state for a moment after start or stop, so an action is polled twice */
 const SETTLE_MS = 1200
+
+/**
+ * A Docker Desktop cold start boots a virtual machine, which takes a minute and answers `unknown` while
+ * it goes. Polling faster than the container loop is what makes the panel notice it came up at all,
+ * and the deadline is what stops a dead engine from holding `working` forever.
+ */
+export const ENGINE_TRANSITION_MS = 2000
+export const ENGINE_DEADLINE_MS = 120000
 
 export function keepContainers(previous: Container[], next: DockerState): Container[] {
   if (next.kind === "unavailable" || next.kind === "stale" || next.kind === "stopped") return previous
@@ -35,6 +44,58 @@ export interface DockerPolling {
   readonly refreshAfterAction: () => Promise<void>
 }
 
+export interface EngineProbe {
+  readonly state: () => EngineState
+  readonly refresh: () => Promise<EngineState>
+  readonly waitForRunning: (deadlineMs?: number) => Promise<boolean>
+}
+
+/**
+ * The engine has its own probe because `docker ps` cannot report it: on a stopped engine the ps call
+ * fails to connect and says only `unavailable`, which is also what a missing CLI or a locked socket
+ * produces. `docker desktop status` is the only thing that tells those apart.
+ */
+export function createEngineProbe(): EngineProbe {
+  const [state, setState] = createSignal<EngineState>("unknown")
+  let disposed = false
+  let probing = false
+
+  /**
+   * A stopped engine takes over four seconds to answer, which is longer than the container poll, so a
+   * probe per poll would leave several of them waiting on the same pipe at once. One at a time is the
+   * whole guard: a call that arrives while one is in flight reads the last known state instead.
+   */
+  const refresh = async (): Promise<EngineState> => {
+    if (probing) return state()
+    probing = true
+    try {
+      const next = await runDesktopStatus()
+      if (!disposed) setState(next)
+      return next
+    } finally {
+      probing = false
+    }
+  }
+
+  onCleanup(() => {
+    disposed = true
+  })
+
+  /** Polls on a deadline rather than on a timer, so disposal has nothing to cancel */
+  const waitForRunning = async (deadlineMs: number = ENGINE_DEADLINE_MS): Promise<boolean> => {
+    const until = Date.now() + deadlineMs
+    for (;;) {
+      if (await refresh() === "running") return true
+      if (disposed || Date.now() >= until) return false
+      await new Promise((resolve) => setTimeout(resolve, ENGINE_TRANSITION_MS))
+    }
+  }
+
+  void refresh()
+
+  return { state, refresh, waitForRunning }
+}
+
 /** The host does not repaint this slot when only a signal changes, so a real change remounts the panel */
 function signature(containers: Container[]): string {
   return containers.map((item) => `${item.name}:${item.state}`).join("|")
@@ -43,7 +104,11 @@ function signature(containers: Container[]): string {
 /** A container in a crash loop changes state on every poll and each remount costs a fresh docker ps */
 const RELOAD_COOLDOWN_MS = 10000
 
-export function createDockerPolling(intervalMs: number, onContentChange: () => void, onPoll?: () => void): DockerPolling {
+export function createDockerPolling(
+  intervalMs: number,
+  onContentChange: () => void,
+  onPoll?: (next: DockerState) => void,
+): DockerPolling {
   const [state, setState] = createSignal<DockerState>(INITIAL)
   let timer: ReturnType<typeof setTimeout> | undefined
   let settle: ReturnType<typeof setTimeout> | undefined
@@ -57,7 +122,7 @@ export function createDockerPolling(intervalMs: number, onContentChange: () => v
     if (disposed) return
     const visible = keepContainers(state().containers, next)
     setState({ ...next, containers: visible })
-    onPoll?.()
+    onPoll?.(next)
     if (next.kind === "unavailable" || next.kind === "stale") return
     const current = signature(visible)
     if (current === last) return

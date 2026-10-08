@@ -1,7 +1,13 @@
 import { execFile } from "node:child_process"
 
 const COMMAND = "docker"
-const TIMEOUT_MS = 4000
+/**
+ * Measured with Docker Desktop stopped on this machine: three runs took 3497, 4439 and 4453 ms.
+ * The CLI plugin spends those seconds waiting on a named pipe that is not answering, so a four second
+ * timeout like the `docker ps` one kills the call and turns a provable `stopped` into `unknown`,
+ * which hides the Start button. Nine seconds clears the measured worst case with room to spare.
+ */
+const TIMEOUT_MS = 9000
 const MAX_BUFFER = 1024 * 1024
 
 export type EngineState = "running" | "stopped" | "absent" | "unknown"
@@ -34,6 +40,8 @@ export function parseDesktopStatus(code: number | null, stdout: string, stderr: 
   return "unknown"
 }
 
+export const ENGINE_TIMEOUT_MS = TIMEOUT_MS
+
 export function runDesktopStatus(timeoutMs: number = TIMEOUT_MS): Promise<EngineState> {
   return new Promise((resolve) => {
     execFile(
@@ -61,12 +69,6 @@ export function runDesktopStatus(timeoutMs: number = TIMEOUT_MS): Promise<Engine
 /** An app-level stop kills every container of every project, so it needs a confirmation the container actions do not */
 export function buildRuntimeArgs(action: RuntimeAction): string[] {
   return ["desktop", action === "engine-start" ? "start" : "stop"]
-}
-
-export function availableRuntimeActions(state: EngineState): RuntimeAction[] {
-  if (state === "stopped") return ["engine-start"]
-  if (state === "running") return ["engine-stop"]
-  return []
 }
 
 export const ENGINE_ACTION_LABEL: Record<RuntimeAction, string> = {
