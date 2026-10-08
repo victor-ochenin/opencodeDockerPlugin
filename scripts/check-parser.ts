@@ -312,9 +312,9 @@ assert.equal(keepContainers(previous, ok).length, 0, "a successful empty poll mu
 assert.equal(keepContainers(previous, { kind: "stale", containers: [], detail: "docker did not respond" }), previous)
 assert.equal(keepContainers(previous, { kind: "unavailable", containers: [], detail: "boom" }), previous)
 assert.equal(
-  keepContainers(previous, { kind: "stopped", containers: [], detail: "" }),
-  previous,
-  "a stopped engine leaves the last known rows on screen instead of emptying the panel",
+  keepContainers(previous, { kind: "stopped", containers: [], detail: "" }).length,
+  0,
+  "a stopped engine really is down, so the rows go instead of lingering as a lie",
 )
 assert.equal(ENGINE_DEADLINE_MS, 120000, "a cold desktop start is about a minute, so the deadline is not tight")
 assert.ok(

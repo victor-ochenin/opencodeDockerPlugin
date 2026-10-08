@@ -18,7 +18,9 @@ export const ENGINE_TRANSITION_MS = 2000
 export const ENGINE_DEADLINE_MS = 120000
 
 export function keepContainers(previous: Container[], next: DockerState): Container[] {
-  if (next.kind === "unavailable" || next.kind === "stale" || next.kind === "stopped") return previous
+  // A stopped engine is not a blip, it means every container really is down, so the rows go rather than
+  // linger as a lie. Only a poll that could not reach docker keeps what was known
+  if (next.kind === "unavailable" || next.kind === "stale") return previous
   return next.containers
 }
 

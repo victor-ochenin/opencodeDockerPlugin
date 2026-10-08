@@ -111,6 +111,7 @@ export function DockerPanel(props: {
 }) {
   const [open, setOpen] = createSignal(true)
   const [busy, setBusy] = createSignal(false)
+  const [stopping, setStopping] = createSignal(false)
   const [logs, setLogs] = createSignal<{ name: string; result: LogResult | null } | null>(null)
   const [offset, setOffset] = createSignal(0)
   const theme = () => props.theme
@@ -230,7 +231,7 @@ export function DockerPanel(props: {
    */
   const pickContainer = async (all: readonly Container[]) => {
     const action = engine.state() === "running" ? ("engine-stop" as RuntimeAction) : undefined
-    const choice = await props.ui.dialog.select<ListChoice>({
+    const pending = props.ui.dialog.select<ListChoice>({
       title: `All containers (${all.length})`,
       placeholder: "Container",
       options: [
@@ -252,6 +253,8 @@ export function DockerPanel(props: {
           : []),
       ],
     })
+    props.ui.dialog.set({ size: "large" })
+    const choice = await pending
     if (!choice) return
     if (choice.kind === "action") {
       await runRuntime(choice.action)
@@ -295,6 +298,9 @@ export function DockerPanel(props: {
       })
       if (!confirmed) return
     }
+    // The containers are about to go, so the rows go with them instead of staying on screen for a
+    // poll or two while the engine finishes shutting down
+    if (action === "engine-stop") setStopping(true)
     setBusy(true)
     try {
       const result = await runDockerArgs(args)
@@ -308,6 +314,7 @@ export function DockerPanel(props: {
       if (action === "engine-start" && result.ok) await engine.waitForRunning()
       await polling.refreshAfterAction()
     } finally {
+      setStopping(false)
       setBusy(false)
     }
   }
@@ -357,7 +364,9 @@ export function DockerPanel(props: {
       },
     ]
     try {
-      const choice = await props.ui.dialog.select<MenuChoice>({ title: container.name, placeholder: "Action", options })
+      const pending = props.ui.dialog.select<MenuChoice>({ title: container.name, placeholder: "Action", options })
+      props.ui.dialog.set({ size: "large" })
+      const choice = await pending
       if (!choice) return
       if (choice === "logs") {
         openLogs(container)
@@ -398,8 +407,15 @@ export function DockerPanel(props: {
     setTimeout(() => void open(), 0)
   }
 
-  const visible = () => selectRows(polling.state().containers, props.pinned)
+  const visible = () => (stopping() ? [] : selectRows(polling.state().containers, props.pinned))
   const hasRows = () => visible().length > 0
+  const hidden = () => Math.max(0, polling.state().containers.length - visible().length)
+  // The line stays when nothing is hidden because it is also the only way into the list, which is where
+  // stopping the engine lives
+  const browseLabel = () =>
+    hidden() > 0
+      ? `${hidden()} more, click for all`
+      : `${polling.state().containers.length} container${polling.state().containers.length === 1 ? "" : "s"}, click for all`
 
   const pressHeader = () => {
     if (hasRows()) {
@@ -414,11 +430,8 @@ export function DockerPanel(props: {
       <box flexDirection="row" gap={1} onMouseUp={(event) => arm(pressHeader, event)}>
         <text fg={theme().text.base}>
           <b>Docker</b>
-          <Show when={polling.state().containers.length > 0}>
+          <Show when={!stopping() && polling.state().containers.length > 0}>
             <span style={{ fg: theme().text.muted }}> ({polling.state().containers.length})</span>
-          </Show>
-          <Show when={!hasRows() && polling.state().containers.length > 0}>
-            <span style={{ fg: theme().text.muted }}> click for the list</span>
           </Show>
         </text>
         <Show when={hasStaleRows(polling.state())}>
@@ -428,6 +441,10 @@ export function DockerPanel(props: {
           <text fg={theme().text.muted}> working</text>
         </Show>
       </box>
+
+      <Show when={!stopping() && !hasRows() && polling.state().containers.length > 0}>
+        <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}> click for the list</text>
+      </Show>
 
       <Show when={engineDown() && !busy()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void runRuntime("engine-start"), event)}>
@@ -454,10 +471,10 @@ export function DockerPanel(props: {
             </box>
           )}
         </Index>
-        <Show when={hasRows() && polling.state().containers.length > visible().length}>
+        <Show when={hasRows()}>
           <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}>
             {" "}
-            {polling.state().containers.length - visible().length} more, click for all
+            {browseLabel()}
           </text>
         </Show>
       </Show>

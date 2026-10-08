@@ -75,11 +75,6 @@ If the header never appears, the plugin did not load: check that the entry is in
 |---|---|---|
 | `intervalMs` | `3000` | Poll interval, clamped to 1000..60000 |
 
-## Known limits
-
-- `Stop Docker Desktop` ends the engine, so every container of every project goes down with it.
-- The npm package ships precompiled ESM, not TypeScript sources. Do not ship `.tsx`, see
-  [docs/features.md](docs/features.md#known-limits) for why.
 
 Everything else lives in [docs/features.md](docs/features.md).
 

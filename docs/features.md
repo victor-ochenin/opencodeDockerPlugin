@@ -4,8 +4,6 @@
 
 ![An unstarted compose stack from the agent directory](demo2.gif)
 
-![Starting and stopping Docker Desktop](demo3.gif)
-
 Русская версия этого файла: [features.ru.md](features.ru.md)
 
 ## Running and stopped containers
@@ -23,7 +21,9 @@ red for `dead`, muted for everything else.
 The panel draws running containers and nothing else, at most five rows in the order docker reports
 them, so the list does not jump between polls. Stopped containers never get a row of their own: the
 header opens a dialog with every container, and picking one there opens the same actions as a click
-on its row. A `N more, click for all` line appears under the rows when something is still hidden.
+on its row. A line under the rows always opens the full list, because that list is also where `Stop Docker Desktop`
+lives. It reads `1 more, click for all` when the five row limit hides something and `2 containers, click
+for all` when everything is already shown.
 With rows to show, the header collapses and expands them instead.
 
 `Pin` in a container's menu keeps that container visible whatever its state, and it spends the five
@@ -41,9 +41,10 @@ Pinned rows are marked `pinned` next to their ports and project.
 | `docker ps` timed out | last known rows with a `stale` marker |
 | No permission on the Docker socket | `no permission to talk to docker`, no buttons |
 
-A missing or stopped Docker is a normal state, not a plugin failure. Any failed poll, whether a
-timeout or a dead daemon, keeps the last known rows with a `stale` marker instead of blanking the
-panel; a successful poll that reports no containers clears the list.
+A missing or stopped Docker is a normal state, not a plugin failure. A poll that could not reach
+docker, whether a timeout or a dead daemon, keeps the last known rows with a `stale` marker instead of
+blanking the panel. A stopped engine is not treated that way: every container really is down, so the
+rows go and the panel says so instead of showing containers that are not serving anything.
 
 ## Actions per container state
 
@@ -142,14 +143,19 @@ CLI plugin that ships with Docker Desktop.
 | `Start Docker Desktop` | a line in the sidebar, shown only when Desktop is stopped | `docker desktop start` |
 | `Stop Docker Desktop` | the last entry of the container list | `docker desktop stop` |
 
+![Starting Docker Desktop](demo3.gif)
+
 `Start` asks first, the same as `Stop`. A cold start brings up a virtual machine and starts consuming
 memory, so a misclick is not free. The panel shows `working` for the whole transition rather than
 dropping the indicator as soon as the command returns.
 
 `Stop` always asks first, and the confirmation names every running container the panel can see,
 because `docker desktop stop` ends the engine and every container goes down with it, across every
-project, not just the one you clicked. The panel does not remember or repeat that list afterwards:
-it keeps the rows it already knew and marks them `stale`.
+project, not just the one you clicked. The moment the command starts, the rows and the header count go
+away and only `Docker working` is left, so the sidebar never shows containers that are on their way
+down.
+
+![Stopping Docker Desktop](demo4.gif)
 
 The container list stays reachable when Docker is down and there are no containers at all, because
 that is exactly when `Stop` matters. An early exit on an empty list used to show a `no containers`
