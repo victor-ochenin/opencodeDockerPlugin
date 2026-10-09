@@ -1,5 +1,6 @@
 import { createSignal, onCleanup } from "solid-js"
 
+import { createEventWatch } from "./events.ts"
 import { runDockerPs } from "./docker.ts"
 import { runDesktopStatus, type EngineState } from "./runtime.ts"
 import type { Container, DockerState } from "./types.ts"
@@ -115,28 +116,60 @@ export function createDockerPolling(
   let timer: ReturnType<typeof setTimeout> | undefined
   let settle: ReturnType<typeof setTimeout> | undefined
   let disposed = false
-  let last = ""
-  let seen = false
+  let shown = ""
+  let mounted = false
   let reloadedAt = 0
 
-  const refresh = async () => {
-    const next = await runDockerPs()
+  /**
+   * `shown` is what the host has been told, not what was last seen. A change that arrives inside the
+   * cooldown has to stay owed rather than be written off, because the signature would match on every
+   * later poll and nothing would ever deliver it.
+   */
+  const apply = (next: DockerState) => {
     if (disposed) return
     const visible = keepContainers(state().containers, next)
     setState({ ...next, containers: visible })
     onPoll?.(next)
     if (next.kind === "unavailable" || next.kind === "stale") return
     const current = signature(visible)
-    if (current === last) return
-    last = current
-    if (!seen) {
-      seen = true
+    if (!mounted) {
+      mounted = true
+      shown = current
       return
     }
+    if (current === shown) return
     if (Date.now() - reloadedAt < RELOAD_COOLDOWN_MS) return
+    shown = current
     reloadedAt = Date.now()
     onContentChange()
   }
+
+  /**
+   * One `docker ps` at a time. Events arrive faster than a ps call returns, and without this the older
+   * result lands last and overwrites the newer one. A call that arrives while one is in flight asks for
+   * one more pass instead of starting a parallel one, the same guard `createEngineProbe` uses.
+   */
+  let reading = false
+  let reread = false
+  const refresh = async () => {
+    if (reading) {
+      reread = true
+      return
+    }
+    reading = true
+    try {
+      do {
+        reread = false
+        apply(await runDockerPs())
+      } while (reread && !disposed)
+    } finally {
+      reading = false
+    }
+  }
+
+  // An event is the trigger now; the interval stays as the net for an event that never arrives
+  const events = createEventWatch()
+  events.onEvent(() => void refresh())
 
   const tick = async () => {
     await refresh()
@@ -150,6 +183,8 @@ export function createDockerPolling(
     disposed = true
     if (timer) clearTimeout(timer)
     if (settle) clearTimeout(settle)
+    // A docker events process outlives the panel otherwise and stays in the task list
+    events.close()
   })
 
   return {

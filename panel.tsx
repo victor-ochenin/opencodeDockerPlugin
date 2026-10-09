@@ -485,7 +485,7 @@ export function DockerPanel(props: {
         </Show>
       </Show>
 
-      <Show when={pendingStack() && !engineDown()}>
+      <Show when={pendingStack() && !engineDown() && !stopping()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
           <b>Up stack</b>
           <span style={{ fg: theme().text.muted }}> · {pendingStack()?.project} is not running here</span>
