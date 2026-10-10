@@ -11,6 +11,23 @@ const INITIAL: DockerState = { kind: "empty", containers: [], detail: "loading" 
 const SETTLE_MS = 1200
 
 /**
+ * Events drive the panel now, so this is only the net for the case where docker says nothing at all:
+ * a container changed outside anything we would hear about, or the stream is gone and the engine has
+ * come back since the last attempt.
+ */
+export const FALLBACK_INTERVAL_MS = 30000
+
+/**
+ * Nothing can change while the engine is down, so a start from the tray is the one thing worth waiting
+ * on closely, and the engine probe has no timer of its own to notice it.
+ */
+const ENGINE_DOWN_RETRY_MS = 3000
+
+export function fallbackDelayMs(kind: DockerState["kind"]): number {
+  return kind === "stopped" ? ENGINE_DOWN_RETRY_MS : FALLBACK_INTERVAL_MS
+}
+
+/**
  * A Docker Desktop cold start boots a virtual machine, which takes a minute and answers `unknown` while
  * it goes. Polling faster than the container loop is what makes the panel notice it came up at all,
  * and the deadline is what stops a dead engine from holding `working` forever.
@@ -45,6 +62,14 @@ export interface DockerPolling {
   readonly state: () => DockerState
   readonly refresh: () => Promise<void>
   readonly refreshAfterAction: () => Promise<void>
+}
+
+/**
+ * A stream that has closed is only worth reopening once docker answers again. Reopening while the
+ * engine is down would spawn a process that cannot work, every tick, for as long as the engine is off.
+ */
+export function shouldReconnect(kind: DockerState["kind"], streamAlive: boolean): boolean {
+  return !streamAlive && (kind === "ok" || kind === "empty")
 }
 
 export interface EngineProbe {
@@ -107,11 +132,7 @@ function signature(containers: Container[]): string {
 /** A container in a crash loop changes state on every poll and each remount costs a fresh docker ps */
 const RELOAD_COOLDOWN_MS = 10000
 
-export function createDockerPolling(
-  intervalMs: number,
-  onContentChange: () => void,
-  onPoll?: (next: DockerState) => void,
-): DockerPolling {
+export function createDockerPolling(onContentChange: () => void, onPoll?: (next: DockerState) => void): DockerPolling {
   const [state, setState] = createSignal<DockerState>(INITIAL)
   let timer: ReturnType<typeof setTimeout> | undefined
   let settle: ReturnType<typeof setTimeout> | undefined
@@ -127,6 +148,10 @@ export function createDockerPolling(
    */
   const apply = (next: DockerState) => {
     if (disposed) return
+    if (shouldReconnect(next.kind, streamAlive)) {
+      streamAlive = true
+      events.restart()
+    }
     const visible = keepContainers(state().containers, next)
     setState({ ...next, containers: visible })
     onPoll?.(next)
@@ -167,14 +192,17 @@ export function createDockerPolling(
     }
   }
 
-  // An event is the trigger now; the interval stays as the net for an event that never arrives
   const events = createEventWatch()
+  let streamAlive = true
   events.onEvent(() => void refresh())
+  events.onDead(() => {
+    streamAlive = false
+  })
 
   const tick = async () => {
     await refresh()
     if (disposed) return
-    timer = setTimeout(tick, intervalMs)
+    timer = setTimeout(tick, fallbackDelayMs(state().kind))
   }
 
   void tick()

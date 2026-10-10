@@ -21,7 +21,7 @@ if (plugin.id !== "docker.panel.cli") throw new Error(`unexpected plugin id: ${p
 const slots: { append?: string; render: unknown }[] = []
 
 const context = {
-  options: { intervalMs: 3000 },
+  options: {},
   location: { directory: root },
   storage: {
     store: (_key: string, options: { initial: { names: string[] } }) => [

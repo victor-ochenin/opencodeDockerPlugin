@@ -10,7 +10,15 @@ import { availableActions, buildArgs } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { INTERESTING_ACTIONS, parseEventLine } from "../events.ts"
-import { ENGINE_DEADLINE_MS, ENGINE_TRANSITION_MS, keepContainers, selectRows } from "../poll.ts"
+import {
+  ENGINE_DEADLINE_MS,
+  ENGINE_TRANSITION_MS,
+  FALLBACK_INTERVAL_MS,
+  fallbackDelayMs,
+  keepContainers,
+  selectRows,
+  shouldReconnect,
+} from "../poll.ts"
 import {
   ENGINE_ACTION_LABEL,
   ENGINE_TIMEOUT_MS,
@@ -354,6 +362,36 @@ assert.equal(
   "a stopped engine really is down, so the rows go instead of lingering as a lie",
 )
 assert.equal(ENGINE_DEADLINE_MS, 120000, "a cold desktop start is about a minute, so the deadline is not tight")
+
+// A stopped engine leaves the stream silent for about thirty seconds and then it exits, so a quiet
+// stream proves nothing and reopening it has to wait for docker to answer again
+assert.equal(shouldReconnect("stopped", false), false, "a stopped engine would only spawn a process that cannot work")
+assert.equal(shouldReconnect("unavailable", false), false, "no docker to talk to, so there is nothing to reopen")
+assert.equal(shouldReconnect("stale", false), false, "a ps that did not answer says nothing about the stream")
+assert.equal(shouldReconnect("ok", false), true, "docker answered and the stream is gone, so it is worth reopening")
+assert.equal(shouldReconnect("empty", false), true, "an empty answer still means the engine is there")
+assert.equal(
+  shouldReconnect("ok", true),
+  false,
+  "a live stream is not reopened just because the poll found nothing new",
+)
+assert.equal(FALLBACK_INTERVAL_MS, 30000, "events carry the updates, so the net is deliberately slow")
+
+// The engine probe has no timer of its own, so a docker started from the tray is only noticed by a poll
+assert.ok(
+  fallbackDelayMs("stopped") < FALLBACK_INTERVAL_MS,
+  "a stopped engine must still be polled closely, or the tray start goes unseen until the slow net fires",
+)
+assert.equal(
+  fallbackDelayMs("ok"),
+  FALLBACK_INTERVAL_MS,
+  "a live engine needs no extra polling, events already carry every change",
+)
+assert.equal(
+  fallbackDelayMs("unavailable"),
+  FALLBACK_INTERVAL_MS,
+  "an engine that cannot be reached is not the stopped case and must not turn into a tight loop",
+)
 assert.ok(
   ENGINE_TIMEOUT_MS > 4500,
   "a stopped engine took 3497-4453 ms to answer, so the probe needs headroom or it reports unknown and hides Start",

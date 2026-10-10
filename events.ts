@@ -44,7 +44,8 @@ export function parseEventLine(line: string): string | null {
 export interface EventWatch {
   /** Fires once per interesting event, immediately. No debounce: the measured gaps are seconds wide */
   readonly onEvent: (onChange: () => void) => void
-  readonly lastEventAt: () => number
+  /** Fires once when the process is gone on its own, which is the only trustworthy sign it cannot recover */
+  readonly onDead: (onDead: () => void) => void
   readonly restart: () => void
   readonly close: () => void
 }
@@ -52,41 +53,51 @@ export interface EventWatch {
 /**
  * A long-lived `docker events` reader.
  *
- * The stream is silent rather than loud when it dies: with Docker stopped it neither exits nor writes
- * to stderr, so the caller needs both a last-event timestamp and an explicit restart.
+ * The stream ends loudly rather than going quiet: stopping Docker Desktop leaves it silent for about
+ * thirty seconds and then writes `unexpected EOF` and exits with code 1. So the caller is told when the
+ * process is gone and decides on its own when reopening is worth the attempt.
  */
 export function createEventWatch(): EventWatch {
   let child: ReturnType<typeof spawn> | undefined
   let buffer = ""
   let closed = false
-  let at = 0
   let consumer: (() => void) | undefined
+  let onDead: (() => void) | undefined
 
   const open = () => {
     if (closed) return
-    child = spawn(COMMAND, ARGS, { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
-    // A docker that is not on the PATH makes spawn emit an error, and an unheard one throws. The
-    // interval poll already covers a stream that never produces anything
-    child.on("error", () => {})
+    const spawned = spawn(COMMAND, ARGS, { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
+    child = spawned
+    // A docker that is not on the PATH makes spawn emit an error, and an unheard one throws
+    spawned.on("error", () => {})
     // A half-written line from the killed process would prepend itself to the new process's first
     // chunk and take that first event down with it
     buffer = ""
-    child.stdout?.setEncoding("utf8")
-    child.stdout?.on("data", (chunk: string) => {
+    spawned.stdout?.setEncoding("utf8")
+    spawned.stdout?.on("data", (chunk: string) => {
       // The last split piece is a partial line and has to survive to the next chunk
       const lines = (buffer + chunk).split("\n")
       buffer = lines.pop() ?? ""
       for (const line of lines) {
         if (!parseEventLine(line)) continue
-        at = Date.now()
         consumer?.()
       }
+    })
+    // Only the process still in hand gets to speak for the stream, and killing one is asynchronous, so
+    // after a restart the previous child still reports in. Trusting that report would drop the live
+    // child's reference, orphan the process and fake a dead stream. The same check covers our own stop,
+    // which clears `child` before killing.
+    spawned.on("close", () => {
+      if (child !== spawned) return
+      child = undefined
+      onDead?.()
     })
   }
 
   const stop = () => {
-    child?.kill()
+    const current = child
     child = undefined
+    current?.kill()
   }
 
   open()
@@ -95,7 +106,9 @@ export function createEventWatch(): EventWatch {
     onEvent: (onChange) => {
       consumer = onChange
     },
-    lastEventAt: () => at,
+    onDead: (handler) => {
+      onDead = handler
+    },
     restart: () => {
       stop()
       open()
@@ -103,6 +116,7 @@ export function createEventWatch(): EventWatch {
     close: () => {
       closed = true
       consumer = undefined
+      onDead = undefined
       stop()
     },
   }
