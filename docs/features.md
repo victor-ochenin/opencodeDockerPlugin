@@ -19,7 +19,7 @@ The dot is coloured by container state: green for `running`, yellow for `paused`
 red for `dead`, muted for everything else.
 
 The panel draws running containers and nothing else, at most five rows in the order docker reports
-them, so the list does not jump between polls. Stopped containers never get a row of their own: the
+them, so the list does not jump around. Stopped containers never get a row of their own: the
 header opens a dialog with every container, and picking one there opens the same actions as a click
 on its row. A line under the rows always opens the full list, because that list is also where `Stop Docker Desktop`
 lives. It reads `1 more, click for all` when the five row limit hides something and `2 containers, click
@@ -41,7 +41,7 @@ Pinned rows are marked `pinned` next to their ports and project.
 | `docker ps` timed out              | last known rows with a `stale` marker         |
 | No permission on the Docker socket | `no permission to talk to docker`, no buttons |
 
-A missing or stopped Docker is a normal state, not a plugin failure. A poll that could not reach
+A missing or stopped Docker is a normal state, not a plugin failure. A read that could not reach
 docker, whether a timeout or a dead daemon, keeps the last known rows with a `stale` marker instead of
 blanking the panel. A stopped engine is not treated that way: every container really is down, so the
 rows go and the panel says so instead of showing containers that are not serving anything.
@@ -67,12 +67,32 @@ it as a flag. Every option shows its exact command in the dialog footer, so the 
 never a surprise.
 
 A container whose image is not on the machine pulls that image first, so it takes much longer to
-reach `running` than the poll interval and the panel will show it as stopped for a while before it
-appears. Nothing is wrong, and no retry is issued.
+reach `running` than the panel does, and it will show as stopped for a while before it appears.
+Nothing is wrong, and no retry is issued.
 
-The result of every action arrives as a toast, and the panel refreshes immediately instead of
-waiting for the next poll. While a command runs the header shows `working` and further clicks are
-ignored, so a double click cannot launch two commands.
+The result of every action arrives as a toast, and the panel refreshes immediately instead of waiting
+for anything. While a command runs the header shows `working` and further clicks are ignored, so a
+double click cannot launch two commands.
+
+## How updates arrive
+
+The panel listens to `docker events` rather than asking on a timer, so a container appears or
+disappears as soon as Docker reports it. Measured on a `compose stop`, the first event landed 442 ms
+after the command, against up to three seconds before.
+
+Only a few events are acted on: `start`, `die`, `destroy`, `pause`, `unpause` and `rename`. The panel
+draws running containers, so `kill`, `stop` and `create` would repaint a frame identical to the one
+already on screen, and everything with an `exec_` or `health_` prefix is the container's own internals.
+
+Polling did not disappear, it became a net. `docker ps` still runs every 30 seconds, and every 3
+seconds while Docker is stopped so that starting Docker Desktop from the tray shows up at once. The net
+covers the cases events cannot: the engine itself, which never appears in the stream, and the first
+couple of seconds after a stream is reopened, before it delivers its first event.
+
+The stream ends loudly rather than quietly: stopping Docker Desktop leaves it silent for about thirty
+seconds, then it writes `unexpected EOF` and exits. The panel treats that exit as the signal to try
+again, but only after `docker ps` says the engine is answering, so no process is spawned for as long
+as Docker stays down.
 
 ## Compose stacks
 
@@ -188,8 +208,8 @@ separately from the app.
 - OpenCode 2 is in beta, so slot names and theme tokens may change.
 - A repaint workaround resets the collapsed state and closes an open log view when the container
   list really changes.
-- The poll spawns `docker ps` on an interval. On a host with hundreds of containers, raise
-  `intervalMs` to 5000 or higher.
+- The sidebar reacts to container events, not to image pulls. A container being pulled for the first
+  time stays off the list until it reaches `running`.
 - At most five running containers get a row, and the five is a constant rather than an option: a
   host with thirty containers shows five and leaves the rest to the dialog. Pinning is the only way
   to promote a sixth.

@@ -35,7 +35,7 @@ whatever is already in it.
 ```jsonc
 {
   "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": [{ "package": "opencode-docker-panel", "options": { "intervalMs": 3000 } }],
+  "plugins": ["opencode-docker-panel"],
 }
 ```
 
@@ -49,7 +49,7 @@ Two things trip people up here, so they are worth stating plainly:
 Restart the TUI afterwards. The host installs the package on the next start; nothing to copy and
 nothing to build.
 
-Pin a version when you want a known state: `{ "package": "opencode-docker-panel@0.5.0" }`.
+Pin a version when you want a known state: `{ "package": "opencode-docker-panel@0.6.0" }`.
 
 ### Verification
 
@@ -71,9 +71,13 @@ If the header never appears, the plugin did not load: check that the entry is in
 
 ## Options
 
-| Option       | Default | Notes                                 |
-| ------------ | ------- | ------------------------------------- |
-| `intervalMs` | `3000`  | Poll interval, clamped to 1000..60000 |
+There are none. The panel follows Docker's own event stream, so there is nothing to configure and
+nothing to tune. It still polls as a safety net every 30 seconds, and every 3 seconds while Docker is
+stopped so that starting Docker Desktop from the tray shows up right away.
+
+Before `0.6.0` there was an `intervalMs` option. It controlled how often the panel ran `docker ps`,
+and it no longer does anything: events carry the updates and the poll is only a net. Leaving it in
+your config is harmless.
 
 Everything else lives in [docs/features.md](docs/features.md).
 
