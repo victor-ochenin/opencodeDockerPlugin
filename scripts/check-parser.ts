@@ -9,7 +9,16 @@ import { isDesktopPipeMissing, parseDockerPs, runDockerPs, shortReason } from ".
 import { availableActions, buildArgs } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
-import { ENGINE_DEADLINE_MS, ENGINE_TRANSITION_MS, keepContainers, selectRows } from "../poll.ts"
+import { INTERESTING_ACTIONS, parseEventLine } from "../events.ts"
+import {
+  ENGINE_DEADLINE_MS,
+  ENGINE_TRANSITION_MS,
+  FALLBACK_INTERVAL_MS,
+  fallbackDelayMs,
+  keepContainers,
+  selectRows,
+  shouldReconnect,
+} from "../poll.ts"
 import {
   ENGINE_ACTION_LABEL,
   ENGINE_TIMEOUT_MS,
@@ -353,6 +362,36 @@ assert.equal(
   "a stopped engine really is down, so the rows go instead of lingering as a lie",
 )
 assert.equal(ENGINE_DEADLINE_MS, 120000, "a cold desktop start is about a minute, so the deadline is not tight")
+
+// A stopped engine leaves the stream silent for about thirty seconds and then it exits, so a quiet
+// stream proves nothing and reopening it has to wait for docker to answer again
+assert.equal(shouldReconnect("stopped", false), false, "a stopped engine would only spawn a process that cannot work")
+assert.equal(shouldReconnect("unavailable", false), false, "no docker to talk to, so there is nothing to reopen")
+assert.equal(shouldReconnect("stale", false), false, "a ps that did not answer says nothing about the stream")
+assert.equal(shouldReconnect("ok", false), true, "docker answered and the stream is gone, so it is worth reopening")
+assert.equal(shouldReconnect("empty", false), true, "an empty answer still means the engine is there")
+assert.equal(
+  shouldReconnect("ok", true),
+  false,
+  "a live stream is not reopened just because the poll found nothing new",
+)
+assert.equal(FALLBACK_INTERVAL_MS, 30000, "events carry the updates, so the net is deliberately slow")
+
+// The engine probe has no timer of its own, so a docker started from the tray is only noticed by a poll
+assert.ok(
+  fallbackDelayMs("stopped") < FALLBACK_INTERVAL_MS,
+  "a stopped engine must still be polled closely, or the tray start goes unseen until the slow net fires",
+)
+assert.equal(
+  fallbackDelayMs("ok"),
+  FALLBACK_INTERVAL_MS,
+  "a live engine needs no extra polling, events already carry every change",
+)
+assert.equal(
+  fallbackDelayMs("unavailable"),
+  FALLBACK_INTERVAL_MS,
+  "an engine that cannot be reached is not the stopped case and must not turn into a tight loop",
+)
 assert.ok(
   ENGINE_TIMEOUT_MS > 4500,
   "a stopped engine took 3497-4453 ms to answer, so the probe needs headroom or it reports unknown and hides Start",
@@ -397,6 +436,75 @@ assert.deepEqual(
   selectRows([named("paused-one", "paused"), named("restarting-one", "restarting")], []),
   [],
   "a paused or restarting container gets no row: the sidebar shows what is serving, not what exists",
+)
+
+// Every line below is a real `docker events --filter type=container --format {{json .}}` record
+const EVENT_ACTOR = { ID: "f7c498669dc3c6", Attributes: { name: "carmanufacturersmvc-db-1" } }
+const eventLine = (type: string, action: string, actor: unknown = EVENT_ACTOR): string =>
+  JSON.stringify({ Type: type, Action: action, Actor: actor })
+
+for (const action of INTERESTING_ACTIONS) {
+  assert.equal(
+    parseEventLine(eventLine("container", action)),
+    "carmanufacturersmvc-db-1",
+    `${action} can change what the panel draws and must trigger a refresh`,
+  )
+}
+
+assert.equal(
+  parseEventLine(eventLine("container", "die")),
+  EVENT_ACTOR.Attributes.name,
+  "the name comes from Actor.Attributes.name",
+)
+assert.notEqual(
+  parseEventLine(eventLine("container", "die")),
+  EVENT_ACTOR.ID,
+  "Actor.ID is a hex id, and a check has to fail if someone reaches for it instead",
+)
+assert.equal(
+  parseEventLine(eventLine("container", "rename", { ID: "f7c498669dc3c6", Attributes: { name: "renamed-probe" } })),
+  "renamed-probe",
+  "a rename event already carries the new name",
+)
+
+// Measured: kill arrives as a pair ahead of stop and die, and by then docker ps already says exited
+for (const action of ["kill", "kill", "stop", "create", "restart"]) {
+  assert.equal(parseEventLine(eventLine("container", action)), null, `${action} repeats the previous frame`)
+}
+
+assert.equal(
+  parseEventLine(eventLine("container", "exec_create: /bin/sh -c SELECT 1")),
+  null,
+  "an exec is the container's internals, not a row the panel draws",
+)
+assert.equal(
+  parseEventLine(eventLine("container", "health_status: healthy")),
+  null,
+  "a health check flapping would otherwise repaint on every beat",
+)
+assert.equal(parseEventLine(eventLine("network", "create")), null, "the type filter is not the only guard")
+assert.equal(parseEventLine(eventLine("volume", "mount")), null, "volume events are filtered by docker as well")
+assert.equal(
+  parseEventLine(eventLine("container", "die", { ID: "f7c4", Attributes: {} })),
+  null,
+  "an event with no container name has nothing to react to",
+)
+assert.equal(parseEventLine('{"Type":"container","Action":"die"}'), null, "an event with no actor is skipped")
+assert.equal(parseEventLine(""), null, "an empty line is not an error")
+assert.equal(parseEventLine("   "), null, "whitespace is not an event")
+assert.equal(parseEventLine("not json at all"), null, "garbage does not throw")
+assert.equal(parseEventLine('{"Type":"container","Action":"di'), null, "a half-written line does not throw")
+assert.equal(parseEventLine("null"), null, "a JSON null is not an event")
+assert.equal(parseEventLine("[1,2,3]"), null, "a JSON array is not an event")
+assert.deepEqual(
+  ["kill", "stop", "die"].map((action) => parseEventLine(eventLine("container", action))),
+  [null, null, "carmanufacturersmvc-db-1"],
+  "of a measured compose stop sequence only die survives, and it is the one that changes the row",
+)
+assert.deepEqual(
+  ["die", "start", "restart"].map((action) => parseEventLine(eventLine("container", action))),
+  ["carmanufacturersmvc-db-1", "carmanufacturersmvc-db-1", null],
+  "a measured docker restart is covered by die and start, so restart would only repeat the frame",
 )
 
 const live = await runDockerPs()

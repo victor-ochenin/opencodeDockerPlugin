@@ -101,7 +101,6 @@ function LogsView(props: {
 }
 
 export function DockerPanel(props: {
-  intervalMs: number
   agentDir: string
   pinned: string[]
   onTogglePin: (name: string) => Promise<void>
@@ -167,9 +166,10 @@ export function DockerPanel(props: {
   const engine = createEngineProbe()
   // The probe only has to be re-read when the poll changes its verdict: an available docker proves the
   // engine answers, and a probe on every poll would stack several four second calls on the same pipe,
-  // while never re-reading it would leave a stale stopped engine once docker starts from the tray
+  // while never re-reading it would leave a stale stopped engine once docker starts from the tray, which
+  // poll.ts covers by keeping the poll fast while the last answer said stopped
   let lastKind = ""
-  const polling = createDockerPolling(props.intervalMs, props.reload, (next) => {
+  const polling = createDockerPolling(props.reload, (next) => {
     refreshStack()
     if (next.kind === lastKind) return
     lastKind = next.kind
@@ -485,7 +485,7 @@ export function DockerPanel(props: {
         </Show>
       </Show>
 
-      <Show when={pendingStack() && !engineDown()}>
+      <Show when={pendingStack() && !engineDown() && !stopping()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
           <b>Up stack</b>
           <span style={{ fg: theme().text.muted }}> · {pendingStack()?.project} is not running here</span>

@@ -3,6 +3,25 @@
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
 that commit.
 
+## 0.6.0 - 2026-10-10
+
+- The panel follows `docker events` instead of asking on a timer, so a container appears or disappears
+  as soon as Docker reports it: 442 ms on a measured `compose stop`, against up to three seconds before
+- Only `start`, `die`, `destroy`, `pause`, `unpause` and `rename` cause a repaint. `kill`, `stop` and
+  `create` would redraw a frame identical to the one already on screen, and `exec_` and `health_` events
+  are the container's own internals
+- Polling stays as a safety net: `docker ps` every 30 seconds, and every 3 seconds while Docker is
+  stopped so that starting Docker Desktop from the tray shows up at once
+- The event stream is reopened when its process exits, which it does loudly: about thirty seconds of
+  silence, then `unexpected EOF` and exit code 1. Reopening waits for `docker ps` to answer, so no
+  process is spawned for as long as Docker stays down
+- `intervalMs` is gone. It controlled how often the panel ran `docker ps`, and events make that
+  meaningless; leaving it in a config is harmless
+- Two container changes in quick succession no longer lose the second one, and simultaneous refreshes
+  can no longer apply out of order
+- `Stop Docker Desktop` hides the `Up stack` line the moment it is pressed rather than after the
+  command finishes
+
 ## 0.5.1 - 2026-10-08
 
 - The repository is formatted with prettier, with a config that matches the existing style: no semicolons,

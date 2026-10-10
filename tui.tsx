@@ -2,14 +2,9 @@ import type { Plugin } from "@opencode/plugin/tui"
 
 import { DockerPanel } from "./panel.tsx"
 
-const MIN_INTERVAL = 1000
-const MAX_INTERVAL = 60000
-
 const plugin: Plugin.Definition = {
   id: "docker.panel.cli",
   setup(context) {
-    const requested = Number(context.options.intervalMs)
-    const intervalMs = Number.isFinite(requested) ? Math.min(Math.max(requested, MIN_INTERVAL), MAX_INTERVAL) : 3000
     const agentDir = context.location?.directory ?? process.cwd()
     const [pinned, setPinned] = context.storage.store("docker-panel.pinned", { initial: { names: [] as string[] } })
     let dispose: (() => void) | undefined
@@ -35,7 +30,6 @@ const plugin: Plugin.Definition = {
       append: "sidebar.content",
       render: () => (
         <DockerPanel
-          intervalMs={intervalMs}
           agentDir={agentDir}
           pinned={pinned.names}
           onTogglePin={togglePin}
