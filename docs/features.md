@@ -187,14 +187,26 @@ Desktop is stopped offers only `Start Docker Desktop`, and nothing at all when t
 missing or the engine state cannot be read.
 
 A stopped engine is read from the container poll, not from a separate probe, because `docker ps`
-already says so: the Desktop backend owns the named pipe `dockerDesktopLinuxEngine`, and when it is
-missing `docker ps` fails with `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file
-specified` in about a quarter second. `docker desktop status` needs four seconds to admit the same
-thing, because the CLI plugin waits on that same pipe before giving up.
+already says so, and it says so in about a quarter second on both platforms. On Windows the Desktop
+backend owns the named pipe `dockerDesktopLinuxEngine`, and when it is missing `docker ps` fails with
+`open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`. On Linux the
+daemon is not there and `docker ps` answers `Cannot connect to the Docker daemon at
+unix:///var/run/docker.sock. Is the docker daemon running?`.
 
-The probe is still there for the cases the poll cannot place. `permission denied` on the pipe means a
-locked socket rather than a stopped engine, and `docker not installed` means no CLI at all, so those
-go to `docker desktop status`. It reports nothing when Docker is stopped: it exits 1 and writes
+Both wordings need a pair, not one phrase. `Cannot connect to the Docker daemon` on its own also
+covers a socket the user may not read, which is reported as `permission denied while trying to
+connect to the Docker daemon socket` and is not a stopped engine at all, so the question that asks
+about the daemon is what tells them apart.
+
+The probe is still there for the cases the poll cannot place. On Windows it asks `docker desktop
+status`, which needs four seconds to admit a stopped engine because the CLI plugin waits on that
+pipe before giving up. On Linux it asks `systemctl is-active docker.service`, which answers in about
+80 ms and, unlike the Windows probe, has a real output contract: one state word on stdout. The panel
+reads the word rather than the exit code because the codes lose the transitions, and `activating` or
+`deactivating` is the state worth drawing right now rather than the one the unit reaches a moment
+later.
+
+On Windows the probe reports nothing when Docker is stopped: it exits 1 and writes
 `Could not retrieve status. Is Docker Desktop running?` to stderr plus `You can start Docker Desktop
 by running 'docker desktop start'.` to stdout. The panel reads the exit code together with that
 wording, and treats anything it cannot place as unknown rather than guessing. No button is offered on
@@ -224,9 +236,20 @@ separately from the app.
 - `Up stack` may stay hidden when the compose file declares its project in a form the panel cannot
   read, such as an indented `name:` or a quoted value. That is a refusal rather than a wrong stack.
 - Actions are mouse-only; the plugin registers no keymap layer.
-- Docker Desktop control is Windows only, and needs the `docker desktop` CLI plugin. Without it the
-  panel offers nothing. There is no fallback to the app executable: that path cannot be tested on a
-  machine where the plugin is present.
+- Engine control needs platform-specific setup and is offered only when that setup is present.
+  Windows needs the `docker desktop` CLI plugin, and has no fallback to the app executable, because
+  that path cannot be tested on a machine where the plugin is present. Linux needs `systemctl` and a
+  sudoers rule for `systemctl start docker.service` and `systemctl stop docker.service
+docker.socket`. The rule is a one-time root step and the panel cannot take it for you, because it
+  has no prompt to read a password from; when the rule is missing the panel says so instead of
+  failing silently.
+- Linux stop names both `docker.service` and `docker.socket`. Stopping only the service is not enough:
+  the service declares `Requires=docker.socket`, so the socket unit brings the daemon straight back,
+  and this panel reconnects by itself every three seconds while it believes the engine is down.
+- On a machine with no systemd at all, a container, WSL, or anything booted under another init, the
+  panel treats engine control as unavailable rather than as a state it cannot place. Nothing can be
+  controlled by a unit command there, and the difference is visible: log polling stops instead of
+  retrying every two seconds against an engine that is not going to answer.
 - Between Docker Desktop starting and its backend creating the named pipe there is a short window
   where the panel offers `Start Docker Desktop` on an engine that is already coming up. Pressing it is
   harmless, the command returns without doing anything.

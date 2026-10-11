@@ -2,7 +2,7 @@ import { createSignal, onCleanup } from "solid-js"
 
 import { createEventWatch } from "./events.ts"
 import { runDockerPs } from "./docker.ts"
-import { runDesktopStatus, type EngineState } from "./runtime.ts"
+import { IS_LINUX, runEngineStatus, type EngineState } from "./runtime.ts"
 import type { Container, DockerState } from "./types.ts"
 
 const INITIAL: DockerState = { kind: "empty", containers: [], detail: "loading" }
@@ -31,9 +31,12 @@ export function fallbackDelayMs(kind: DockerState["kind"]): number {
  * A Docker Desktop cold start boots a virtual machine, which takes a minute and answers `unknown` while
  * it goes. Polling faster than the container loop is what makes the panel notice it came up at all,
  * and the deadline is what stops a dead engine from holding `working` forever.
+ *
+ * The Linux daemon is a process rather than a machine to boot, so the same wait is mostly dead time
+ * after a command that already came back, and a much shorter deadline clears it with room to spare.
  */
 export const ENGINE_TRANSITION_MS = 2000
-export const ENGINE_DEADLINE_MS = 120000
+export const ENGINE_DEADLINE_MS = IS_LINUX ? 30000 : 120000
 
 export function keepContainers(previous: Container[], next: DockerState): Container[] {
   // A stopped engine is not a blip, it means every container really is down, so the rows go rather than
@@ -81,7 +84,7 @@ export interface EngineProbe {
 /**
  * The engine has its own probe because `docker ps` cannot report it: on a stopped engine the ps call
  * fails to connect and says only `unavailable`, which is also what a missing CLI or a locked socket
- * produces. `docker desktop status` is the only thing that tells those apart.
+ * produces. The engine probe is the only thing that tells those apart.
  */
 export function createEngineProbe(): EngineProbe {
   const [state, setState] = createSignal<EngineState>("unknown")
@@ -97,7 +100,7 @@ export function createEngineProbe(): EngineProbe {
     if (probing) return state()
     probing = true
     try {
-      const next = await runDesktopStatus()
+      const next = await runEngineStatus()
       if (!disposed) setState(next)
       return next
     } finally {

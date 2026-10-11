@@ -3,6 +3,28 @@
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
 that commit.
 
+## 0.7.0 - 2026-10-11
+
+- The panel works on Linux. The engine there is the `docker.service` systemd unit rather than a
+  Desktop app, so starting and stopping go through `systemctl` instead of `docker desktop`
+- A stopped Linux daemon is recognised from `docker ps` by its own wording,
+  `Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?`.
+  Both halves of the sentence are required, because the first half alone also covers a socket the
+  user may not read
+- The Linux probe reads `systemctl is-active` rather than an exit code, because the codes lose the
+  transitions: `activating` and `deactivating` are the states worth drawing now
+- Linux stop names `docker.service` and `docker.socket` together. The service declares
+  `Requires=docker.socket`, so stopping only the service lets the socket bring the daemon straight
+  back, and this panel reconnects by itself every three seconds while it believes the engine is down
+- The unit controls go through `sudo -n`, so a missing rule fails immediately instead of hanging on a
+  password prompt the TUI has no way to answer, and the failure is replaced by the sudoers line to add
+- Panel copy names the product per platform: `Docker` on Linux, `Docker Desktop` on Windows
+- Probe timeouts are split, because the two calls differ by orders of magnitude: 9000 ms for
+  `docker desktop status`, which needs four seconds to admit a stopped engine, and 3000 ms for
+  `systemctl is-active`, which answers in about 80 ms
+- The cold-start deadline drops from two minutes to 30 seconds on Linux, where the engine is a
+  process rather than a virtual machine to boot
+
 ## 0.6.0 - 2026-10-10
 
 - The panel follows `docker events` instead of asking on a timer, so a container appears or disappears

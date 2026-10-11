@@ -14,7 +14,12 @@
 ## Требования
 
 - Рантайм OpenCode 2 со слотами плагинов (`opencode2`)
-- `docker` в `PATH`. Запуск и остановка Docker Desktop требуют CLI-плагина `docker desktop` и работают только на Windows
+- `docker` в `PATH`
+- Для управления движком нужно ещё одно условие на каждой платформе. На Windows это CLI-плагин
+  `docker desktop`. На Linux движок это systemd-юнит `docker.service`, и управление им требует
+  разового шага от root: правила sudoers для `systemctl start docker.service` и
+  `systemctl stop docker.service docker.socket`. Без этого правила панель всё равно показывает
+  контейнеры, она просто не может запустить или остановить движок и говорит об этом при попытке.
 
 ## Установка
 

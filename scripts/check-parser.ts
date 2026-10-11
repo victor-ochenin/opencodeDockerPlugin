@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { isDesktopPipeMissing, parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
+import { isDesktopPipeMissing, isEngineUnreachable, parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
 import { availableActions, buildArgs } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
@@ -22,9 +22,14 @@ import {
 import {
   ENGINE_ACTION_LABEL,
   ENGINE_TIMEOUT_MS,
+  IS_LINUX,
   buildRuntimeArgs,
+  buildRuntimeCommand,
+  explainPrivilegeFailure,
   parseDesktopStatus,
+  parseEngineStatus,
   runDesktopStatus,
+  runEngineStatus,
 } from "../runtime.ts"
 import type { Container, DockerState } from "../types.ts"
 
@@ -111,14 +116,117 @@ assert.equal(
 )
 assert.equal(parseDesktopStatus(null, "", ""), "unknown", "no docker binary at all is unknown, never stopped")
 assert.equal(parseDesktopStatus(1, "", "permission denied"), "unknown", "a socket refusal is not a stopped engine")
-assert.deepEqual(buildRuntimeArgs("engine-start"), ["desktop", "start"])
-assert.deepEqual(buildRuntimeArgs("engine-stop"), ["desktop", "stop"])
-assert.equal(ENGINE_ACTION_LABEL["engine-stop"], "Stop Docker Desktop")
+assert.deepEqual(
+  buildRuntimeArgs("engine-start"),
+  IS_LINUX ? ["systemctl", "start", "docker.service"] : ["desktop", "start"],
+  IS_LINUX
+    ? "starting names one unit because Requires=docker.socket pulls the socket up with it"
+    : "the Desktop CLI starts the app",
+)
+assert.deepEqual(
+  buildRuntimeArgs("engine-stop"),
+  IS_LINUX ? ["systemctl", "stop", "docker.service", "docker.socket"] : ["desktop", "stop"],
+  IS_LINUX
+    ? "the stop has to name the socket too, or socket activation brings the daemon straight back"
+    : "the Desktop CLI stops the app",
+)
+assert.equal(ENGINE_ACTION_LABEL["engine-stop"], IS_LINUX ? "Stop Docker" : "Stop Docker Desktop")
 assert.equal(
   buildRuntimeArgs("engine-stop").includes("--force"),
   false,
   "force would bypass the confirmation that an app-level stop has to ask for",
 )
+
+// The Linux control is a sudo call, and the binary is `sudo` rather than `docker`
+assert.equal(buildRuntimeCommand("engine-stop").bin, IS_LINUX ? "sudo" : "docker")
+assert.equal(
+  buildRuntimeCommand("engine-stop").args.includes("-n"),
+  IS_LINUX,
+  IS_LINUX
+    ? "sudo without -n blocks on a password prompt the panel has no TTY to answer"
+    : "there is no sudo on the Desktop path, so there is nothing to make non-interactive",
+)
+// The one failure the reader can fix is a missing sudoers rule, and the wording is measured, not guessed
+assert.ok(
+  explainPrivilegeFailure("sudo: interactive authentication is required"),
+  "the wording this machine's sudo actually prints for -n with no rule must be the one that is matched",
+)
+assert.ok(
+  explainPrivilegeFailure("sudo: a terminal is required to read the password"),
+  "the wording that appears when a password is solicited is matched too",
+)
+assert.ok(explainPrivilegeFailure("sorry, user ochenin is not allowed to run 'systemctl start'"))
+assert.ok(
+  String(explainPrivilegeFailure("sudo: interactive authentication is required")).includes("docker.socket"),
+  "the stop names docker.socket as well, so the hint has to print the socket or the rule will not match it",
+)
+assert.equal(explainPrivilegeFailure("Job for docker.service failed"), undefined, "an unrelated failure is left alone")
+
+// systemctl is-active writes one state word and a code that follows it, so the word is what proves the state
+assert.equal(parseEngineStatus(0, "active\n", ""), "running", "exit 0 with active is a running daemon")
+assert.equal(parseEngineStatus(3, "inactive\n", ""), "stopped", "exit 3 with inactive is a stopped daemon")
+assert.equal(
+  parseEngineStatus(3, "failed\n", ""),
+  "stopped",
+  "a failed unit is not running, which is all the panel asks",
+)
+assert.equal(
+  parseEngineStatus(4, "unknown\n", ""),
+  "absent",
+  "an unknown unit is docker not being installed here, which is not the stopped case",
+)
+// Measured with Docker installed: a unit that does not exist prints `inactive`, exactly what a
+// stopped docker.service prints, and only the exit code separates them
+assert.equal(
+  parseEngineStatus(4, "inactive\n", ""),
+  "absent",
+  "code 4 outranks the word, otherwise the panel offers Start Docker for a Docker that is not installed",
+)
+assert.equal(
+  parseEngineStatus(3, "inactive\n", ""),
+  "stopped",
+  "the same word with code 3 is a unit that loaded and is stopped, which is the case worth offering Start for",
+)
+assert.equal(
+  parseEngineStatus(3, "activating\n", ""),
+  "running",
+  "activating is already on its way up, so it reads as running rather than waiting on a second poll",
+)
+assert.equal(parseEngineStatus(3, "deactivating\n", ""), "stopped", "already on its way down, so it reads as stopped")
+assert.equal(parseEngineStatus(null, "", ""), "absent", "no code means systemctl never ran")
+assert.equal(
+  parseEngineStatus(1, "", "Could not find the requested service"),
+  "absent",
+  "a unit systemd cannot resolve is absent rather than stopped",
+)
+assert.equal(parseEngineStatus(1, "", "something else entirely"), "unknown", "an unrecognised answer stays unknown")
+// No systemd is the absent case, not an unplaceable one: the panel stops polling docker logs for
+// `absent`, so `unknown` here would keep a doomed log call running every two seconds
+for (const wording of [
+  "System has not been booted with systemd as init system (PID 1). Can't operate.",
+  "Failed to connect to bus: Host is down",
+]) {
+  assert.equal(
+    parseEngineStatus(1, "", wording),
+    "absent",
+    `a machine without systemd has no unit to control, which is what absent means: ${wording.slice(0, 30)}`,
+  )
+}
+
+// The stopped daemon wording on Linux, and the pair that keeps a permission refusal out of it
+assert.equal(
+  isEngineUnreachable(
+    "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+  ),
+  true,
+  "the measured ps failure of a stopped Linux daemon",
+)
+assert.equal(
+  isEngineUnreachable("permission denied while trying to connect to the Docker daemon socket"),
+  false,
+  "a socket the user may not read is not a stopped engine, and the question is what tells them apart",
+)
+assert.equal(isEngineUnreachable("Cannot connect to the Docker daemon"), false, "half the wording proves nothing")
 
 const compose = parseDockerPs(
   '{"Names":"/web","State":"running","Labels":"com.docker.compose.project=socnot,com.docker.compose.service=web,com.docker.compose.oneoff=False"}',
@@ -361,7 +469,13 @@ assert.equal(
   0,
   "a stopped engine really is down, so the rows go instead of lingering as a lie",
 )
-assert.equal(ENGINE_DEADLINE_MS, 120000, "a cold desktop start is about a minute, so the deadline is not tight")
+assert.equal(
+  ENGINE_DEADLINE_MS,
+  IS_LINUX ? 30000 : 120000,
+  IS_LINUX
+    ? "the daemon is a process rather than a virtual machine, so the cold start it waits for is seconds"
+    : "a cold desktop start is about a minute, so the deadline is not tight",
+)
 
 // A stopped engine leaves the stream silent for about thirty seconds and then it exits, so a quiet
 // stream proves nothing and reopening it has to wait for docker to answer again
@@ -393,8 +507,10 @@ assert.equal(
   "an engine that cannot be reached is not the stopped case and must not turn into a tight loop",
 )
 assert.ok(
-  ENGINE_TIMEOUT_MS > 4500,
-  "a stopped engine took 3497-4453 ms to answer, so the probe needs headroom or it reports unknown and hides Start",
+  ENGINE_TIMEOUT_MS > (IS_LINUX ? 0 : 4500),
+  IS_LINUX
+    ? "systemctl is-active answered in 81 ms, so the probe only has to clear a local call"
+    : "a stopped engine took 3497-4453 ms to answer, so the probe needs headroom or it reports unknown and hides Start",
 )
 assert.ok(
   ENGINE_TRANSITION_MS < ENGINE_DEADLINE_MS,
@@ -514,10 +630,10 @@ assert.ok(
 )
 
 // Read-only, like runDockerPs above: it must never start or stop anything, and check runs in CI on Linux too
-const engine = await runDesktopStatus()
+const engine = await runEngineStatus()
 assert.ok(["running", "stopped", "absent", "unknown"].includes(engine), `unexpected engine status: ${engine}`)
 assert.ok(
-  ["running", "stopped", "absent", "unknown"].includes(await runDesktopStatus(1)),
+  ["running", "stopped", "absent", "unknown"].includes(await runEngineStatus(1)),
   "a one millisecond timeout must resolve to a state instead of hanging the checks",
 )
 
