@@ -14,8 +14,12 @@ What it does, with demos: [docs/features.md](docs/features.md). Русская �
 ## Requirements
 
 - OpenCode 2 runtime with plugin slots (`opencode2`)
-- `docker` on `PATH`. Starting and stopping Docker Desktop needs its `docker desktop` CLI plugin
-  and works on Windows only
+- `docker` on `PATH`
+- Engine control needs one more thing per platform. On Windows it is the `docker desktop` CLI plugin.
+  On Linux the engine is the `docker.service` systemd unit, and controlling it needs a one-time root
+  step: a sudoers rule for `systemctl start docker.service` and `systemctl stop docker.service
+docker.socket`. Without that rule the panel still lists containers, it just cannot start or stop the
+  engine, and it says so when you try.
 
 ## Install
 

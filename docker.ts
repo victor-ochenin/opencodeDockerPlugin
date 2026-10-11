@@ -27,6 +27,22 @@ export function isDesktopPipeMissing(raw: string): boolean {
   )
 }
 
+/**
+ * The Linux wording for the same condition, where the engine is a systemd unit rather than a named
+ * pipe: a stopped daemon answers `Cannot connect to the Docker daemon at unix:///var/run/docker.sock.
+ * Is the docker daemon running?`.
+ *
+ * The same rule as above applies, and it is why this is not merely a check for `cannot connect`:
+ * that phrase on its own also covers a socket the user may not read, which is reported as
+ * `permission denied while trying to connect to the Docker daemon socket` and is not a stopped
+ * engine at all. Only the pair proves the daemon is down, so the question that asks about the
+ * daemon has to be there too.
+ */
+export function isEngineUnreachable(raw: string): boolean {
+  const text = raw.toLowerCase()
+  return text.includes("cannot connect to the docker daemon") && text.includes("is the docker daemon running")
+}
+
 export function shortReason(raw: string): string {
   const text = raw.toLowerCase()
   if (text.includes("docker_engine") || text.includes("is the server running")) return "no connection to docker"
@@ -129,7 +145,10 @@ export function runDockerPs(timeoutMs: number = TIMEOUT_MS): Promise<DockerState
           return
         }
         const raw = String(stderr || error.message)
-        if (isDesktopPipeMissing(raw)) {
+        // Both wordings name a daemon that is installed and down. Reading one of them as `stopped`
+        // is what lets the panel offer the Start control; the engine probe is the authority, this is
+        // only the fast path that clears the rows
+        if (isDesktopPipeMissing(raw) || isEngineUnreachable(raw)) {
           resolve({ kind: "stopped", containers: [], detail: "" })
           return
         }

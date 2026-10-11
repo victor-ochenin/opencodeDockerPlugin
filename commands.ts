@@ -61,29 +61,63 @@ function firstLine(text: string): string {
 export interface CommandResult {
   readonly ok: boolean
   readonly message: string
+  /**
+   * The exit code, or null when the process never got to exit one: a timeout kill or a binary that
+   * is not on PATH. Kept because the engine probe reads state out of exit codes rather than out of
+   * prose: `systemctl is-active` answers 3 for an inactive unit and `docker desktop status` answers
+   * 125 for a subcommand that does not exist, and both of those are ordinary failures that a
+   * `message` string cannot be told apart from any other.
+   */
+  readonly code: number | null
+  readonly stdout: string
+  readonly stderr: string
+  /** True when the call was killed rather than answered, so nothing it produced may be read as a verdict */
+  readonly timedOut: boolean
 }
 
 /**
- * Runs an already-built argument list.
+ * Runs an already-built argument list against a named binary.
+ *
+ * The binary is a parameter rather than a constant because the engine controls do not go through
+ * docker at all: on Linux the daemon is a systemd unit and its commands are `systemctl`, reached
+ * through sudo, so `docker <args>` cannot express them.
+ *
+ * There is no stdin and no TTY here on purpose: a control that waits for a password prompt has
+ * nothing to read the password from, so the engine path passes `-n` to sudo and fails fast instead
+ * of hanging until the timeout.
+ */
+export function runProcess(
+  bin: string,
+  args: readonly string[],
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      [...args],
+      { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER },
+      (error, stdout, stderr) => {
+        const out = String(stdout)
+        const err = String(stderr)
+        if (!error) {
+          resolve({ ok: true, message: firstLine(out) || "done", code: 0, stdout: out, stderr: err, timedOut: false })
+          return
+        }
+        const timedOut = (error as { killed?: boolean }).killed === true
+        const code = typeof error.code === "number" ? error.code : null
+        const reason = firstLine(err) || (timedOut ? "timed out" : firstLine(error.message))
+        resolve({ ok: false, message: reason || "command failed", code, stdout: out, stderr: err, timedOut })
+      },
+    )
+  })
+}
+
+/**
+ * Runs an already-built argument list against the docker CLI.
  *
  * `up` has no container behind it, so the boundary takes the argv rather than a container the caller
  * would have to invent to satisfy the type.
  */
 export function runDockerArgs(args: readonly string[]): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    execFile(
-      COMMAND,
-      [...args],
-      { timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_BUFFER },
-      (error, stdout, stderr) => {
-        if (!error) {
-          resolve({ ok: true, message: firstLine(String(stdout)) || "done" })
-          return
-        }
-        const killed = (error as { killed?: boolean }).killed === true
-        const reason = firstLine(String(stderr)) || (killed ? "timed out" : error.message)
-        resolve({ ok: false, message: reason || "command failed" })
-      },
-    )
-  })
+  return runProcess(COMMAND, args)
 }

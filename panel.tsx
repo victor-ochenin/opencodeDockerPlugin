@@ -2,11 +2,18 @@ import { Index, Show, createEffect, createSignal, onCleanup } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
-import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs } from "./commands.ts"
+import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs, runProcess } from "./commands.ts"
 import { findComposeFile, type ComposeTarget } from "./compose.ts"
 import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
 import { createDockerPolling, createEngineProbe, selectRows } from "./poll.ts"
-import { ENGINE_ACTION_LABEL, buildRuntimeArgs, type RuntimeAction } from "./runtime.ts"
+import {
+  ENGINE_ACTION_LABEL,
+  ENGINE_NAME,
+  buildRuntimeCommand,
+  describeRuntimeCommand,
+  explainPrivilegeFailure,
+  type RuntimeAction,
+} from "./runtime.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
 const LOG_VIEW_LINES = 15
@@ -249,7 +256,7 @@ export function DockerPanel(props: {
                 title: ENGINE_ACTION_LABEL[action],
                 value: { kind: "action", action } as ListChoice,
                 description: "stops every container of every project",
-                footer: `docker ${buildRuntimeArgs(action).join(" ")}`,
+                footer: describeRuntimeCommand(action),
               },
             ]
           : []),
@@ -281,21 +288,21 @@ export function DockerPanel(props: {
    */
   const runRuntime = async (action: RuntimeAction) => {
     if (busy()) return
-    const args = buildRuntimeArgs(action)
+    const command = buildRuntimeCommand(action)
     const title = ENGINE_ACTION_LABEL[action]
     if (action === "engine-stop") {
       const running = polling.state().containers.filter((item) => item.state === "running")
       const names = running.length > 0 ? running.map((item) => item.name).join(", ") : "nothing the panel knows about"
       const confirmed = await props.ui.dialog.confirm({
-        title: "Stop Docker Desktop?",
+        title: `Stop ${ENGINE_NAME}?`,
         message: `Stops the engine, so every container stops with it. Visible to the panel: ${names}.\n\nNot reversible from the panel.`,
         label: { confirm: "Stop", cancel: "Cancel" },
       })
       if (!confirmed) return
     } else {
       const confirmed = await props.ui.dialog.confirm({
-        title: "Start Docker Desktop?",
-        message: `Brings up the engine and its virtual machine.\n\ndocker ${args.join(" ")}`,
+        title: `Start ${ENGINE_NAME}?`,
+        message: `Brings up the engine.\n\n${command.bin} ${describeRuntimeCommand(action)}`,
         label: { confirm: "Start", cancel: "Cancel" },
       })
       if (!confirmed) return
@@ -305,10 +312,13 @@ export function DockerPanel(props: {
     if (action === "engine-stop") setStopping(true)
     setBusy(true)
     try {
-      const result = await runDockerArgs(args)
+      const result = await runProcess(command.bin, command.args)
+      // The one failure the reader can act on is a missing sudoers rule, and the raw sudo wording
+      // does not say what to do about it, so the hint takes its place
+      const privilege = result.ok ? undefined : explainPrivilegeFailure(result.message)
       props.ui.toast.show({
         title,
-        message: result.ok ? `${title}: ${result.message}` : result.message,
+        message: result.ok ? `${title}: ${result.message}` : (privilege ?? result.message),
         variant: result.ok ? "success" : "error",
       })
       // busy stays on for the whole transition, otherwise working disappears while the VM boots
@@ -454,7 +464,7 @@ export function DockerPanel(props: {
 
       <Show when={engineDown() && !busy()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void runRuntime("engine-start"), event)}>
-          <b>Start Docker Desktop</b>
+          <b>Start {ENGINE_NAME}</b>
           <span style={{ fg: theme().text.muted }}> · click to start</span>
         </text>
       </Show>
