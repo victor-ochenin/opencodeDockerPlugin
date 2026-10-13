@@ -302,7 +302,7 @@ export function DockerPanel(props: {
     } else {
       const confirmed = await props.ui.dialog.confirm({
         title: `Start ${ENGINE_NAME}?`,
-        message: `Brings up the engine.\n\n${command.bin} ${describeRuntimeCommand(action)}`,
+        message: `Brings up the engine.\n\n${describeRuntimeCommand(action)}`,
         label: { confirm: "Start", cancel: "Cancel" },
       })
       if (!confirmed) return

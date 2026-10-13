@@ -56,8 +56,12 @@ export interface EventWatch {
  * The stream ends loudly rather than going quiet: stopping Docker Desktop leaves it silent for about
  * thirty seconds and then writes `unexpected EOF` and exits with code 1. So the caller is told when the
  * process is gone and decides on its own when reopening is worth the attempt.
+ *
+ * The reader is a parameter so the checks can hold a real long-lived process open instead of docker:
+ * the identity check below is the only thing between a restart and an orphaned child, and it cannot be
+ * observed while the binary under test is already gone because the daemon is down.
  */
-export function createEventWatch(): EventWatch {
+export function createEventWatch(bin: string = COMMAND, args: readonly string[] = ARGS): EventWatch {
   let child: ReturnType<typeof spawn> | undefined
   let buffer = ""
   let closed = false
@@ -66,7 +70,7 @@ export function createEventWatch(): EventWatch {
 
   const open = () => {
     if (closed) return
-    const spawned = spawn(COMMAND, ARGS, { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
+    const spawned = spawn(bin, [...args], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })
     child = spawned
     // A docker that is not on the PATH makes spawn emit an error, and an unheard one throws
     spawned.on("error", () => {})

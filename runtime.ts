@@ -162,10 +162,16 @@ export function buildRuntimeCommand(action: RuntimeAction): RuntimeCommand {
   return { bin: SUDO_BIN, args: [...SUDO_NONINTERACTIVE, ...buildRuntimeArgs(action)] }
 }
 
-/** What the confirmation dialogs and the list footer print, so the reader sees the command that will really run */
+/**
+ * What the confirmation dialogs and the list footer print, so the reader sees the command that will
+ * really run.
+ *
+ * The binary is part of it: on Linux the argv is `-n systemctl stop docker.service docker.socket`,
+ * which is not runnable on its own and silently drops the privilege the call actually needs.
+ */
 export function describeRuntimeCommand(action: RuntimeAction): string {
-  const { args } = buildRuntimeCommand(action)
-  return args.join(" ")
+  const { bin, args } = buildRuntimeCommand(action)
+  return [bin, ...args].join(" ")
 }
 
 export const ENGINE_ACTION_LABEL: Record<RuntimeAction, string> = {
@@ -200,11 +206,6 @@ export function explainPrivilegeFailure(raw: string): string | undefined {
 }
 
 /**
- * Printed in the exact form it has to be written, because a sudoers line is not something a reader
- * should have to assemble from the argv. `%u` is not valid here: it has to be the actual user, and
- * `sudo -l` shows whether the rule took.
- */
-/**
  * The name has to be the real one, and `$USER` cannot stand in: it goes inside single quotes, so the
  * shell would not expand it and the reader would end up with a sudoers rule for nobody.
  *
@@ -222,9 +223,20 @@ function currentUser(): string {
   }
 }
 
+const SAFE_USER = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/
+
+/**
+ * Printed in the exact form it has to be written, because a sudoers line is not something a reader
+ * should have to assemble from the argv. `%u` is not valid here: it has to be the actual user, and
+ * `sudo -l` shows whether the rule took.
+ *
+ * The name is refused unless it looks like a name because this line is a command the reader pastes
+ * into a shell running as root, and a name carrying a quote would make it a different command.
+ */
 export function sudoersHint(user: string = currentUser()): string {
+  const name = SAFE_USER.test(user) ? user : "YOUR_USER"
   return [
-    `needs root, once, as root: echo '${user} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${SYSTEMD_UNIT}, /usr/bin/systemctl stop ${SYSTEMD_UNIT} ${SYSTEMD_SOCKET_UNIT}' | sudo tee /etc/sudoers.d/opencode-docker`,
+    `needs root, once, as root: echo '${name} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${SYSTEMD_UNIT}, /usr/bin/systemctl stop ${SYSTEMD_UNIT} ${SYSTEMD_SOCKET_UNIT}' | sudo tee /etc/sudoers.d/opencode-docker`,
   ].join("\n")
 }
 

@@ -6,14 +6,15 @@ import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { isDesktopPipeMissing, isEngineUnreachable, parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
-import { availableActions, buildArgs } from "../commands.ts"
+import { availableActions, buildArgs, runProcess } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
 import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
-import { INTERESTING_ACTIONS, parseEventLine } from "../events.ts"
+import { INTERESTING_ACTIONS, createEventWatch, parseEventLine } from "../events.ts"
 import {
   ENGINE_DEADLINE_MS,
   ENGINE_TRANSITION_MS,
   FALLBACK_INTERVAL_MS,
+  MAX_RUNNING,
   fallbackDelayMs,
   keepContainers,
   selectRows,
@@ -21,15 +22,18 @@ import {
 } from "../poll.ts"
 import {
   ENGINE_ACTION_LABEL,
+  ENGINE_NAME,
   ENGINE_TIMEOUT_MS,
   IS_LINUX,
   buildRuntimeArgs,
   buildRuntimeCommand,
+  describeRuntimeCommand,
   explainPrivilegeFailure,
   parseDesktopStatus,
   parseEngineStatus,
   runDesktopStatus,
   runEngineStatus,
+  sudoersHint,
 } from "../runtime.ts"
 import type { Container, DockerState } from "../types.ts"
 
@@ -621,6 +625,75 @@ assert.deepEqual(
   ["die", "start", "restart"].map((action) => parseEventLine(eventLine("container", action))),
   ["carmanufacturersmvc-db-1", "carmanufacturersmvc-db-1", null],
   "a measured docker restart is covered by die and start, so restart would only repeat the frame",
+)
+
+// The footer of the browse list and the text of the confirmation dialog both come from here, and both
+// tell the reader what is about to run. On Linux the argv alone is `-n systemctl stop docker.service
+// docker.socket`, which is not runnable and hides the sudo the call actually needs.
+for (const action of ["engine-start", "engine-stop"] as const) {
+  const { bin, args } = buildRuntimeCommand(action)
+  assert.equal(
+    describeRuntimeCommand(action),
+    `${bin} ${args.join(" ")}`,
+    `${action}: the described string has to be the whole command`,
+  )
+  assert.equal(
+    describeRuntimeCommand(action).startsWith(`${bin} `),
+    true,
+    `${action}: dropping the binary prints a command that does not exist`,
+  )
+  assert.equal(
+    describeRuntimeCommand(action).startsWith(IS_LINUX ? "sudo " : "docker "),
+    true,
+    `${action}: the leading word is what the platform actually runs`,
+  )
+}
+
+// sudoersHint writes into a line the reader pastes into a shell that is already root, so a name that
+// is not a name has to be refused rather than quoted
+assert.ok(
+  sudoersHint("bob").includes("'bob ALL=(root) NOPASSWD:"),
+  "a plain name is written as it is, otherwise the rule is for nobody",
+)
+for (const hostile of ["a'b", "x'; rm -rf ~; echo '", "$(id)", "a b", "", "bob\nALL=(root) NOPASSWD: ALL"]) {
+  assert.ok(
+    sudoersHint(hostile).includes("'YOUR_USER "),
+    `a name that is not a name must not reach the root shell: ${JSON.stringify(hostile)}`,
+  )
+}
+assert.ok(!sudoersHint("a'b").includes("a'b"), "a quote in the name must not survive into the printed command at all")
+
+// restart() kills the old child and its close arrives after the new one is in hand. Without the
+// identity check the stale report drops the live child's reference, orphans the process and fakes a
+// dead stream. A long-lived node process stands in for docker so this is observable with no daemon.
+const HANGING = ["-e", "setTimeout(() => {}, 10000)"]
+let reportedDead = false
+const watch = createEventWatch(process.execPath, HANGING)
+watch.onDead(() => {
+  reportedDead = true
+})
+watch.restart()
+await new Promise((resolve) => setTimeout(resolve, 1200))
+assert.equal(reportedDead, false, "the killed child's close must not speak for the child now in hand")
+watch.close()
+await new Promise((resolve) => setTimeout(resolve, 500))
+assert.equal(reportedDead, false, "close() releases the stream without announcing it dead")
+
+// Everything downstream reads state out of these two fields rather than out of the message, so a
+// missing binary and a timeout have to stay distinguishable from each other and from a real failure
+const absent = await runProcess("definitely-not-a-binary-xyz", [])
+assert.equal(absent.ok, false, "a binary that is not on PATH is a failure, not a throw")
+assert.equal(absent.code, null, "a process that never ran has no exit code to report")
+assert.equal(absent.timedOut, false, "a missing binary is not a timeout, and the engine probe reads that difference")
+
+const killed = await runProcess(process.execPath, HANGING, 300)
+assert.equal(killed.ok, false, "a call that had to be killed did not succeed")
+assert.equal(killed.timedOut, true, "a killed call has to say so, or a timeout reads as a verdict")
+
+assert.equal(ENGINE_NAME, IS_LINUX ? "Docker" : "Docker Desktop", "the product named is the one installed")
+assert.ok(
+  selectRows(busyHost, []).length <= MAX_RUNNING,
+  `the sidebar shows at most ${MAX_RUNNING} unpinned running rows`,
 )
 
 const live = await runDockerPs()
