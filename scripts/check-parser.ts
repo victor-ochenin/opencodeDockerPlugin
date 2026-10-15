@@ -6,9 +6,9 @@ import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { isDesktopPipeMissing, isEngineUnreachable, parseDockerPs, runDockerPs, shortReason } from "../docker.ts"
-import { availableActions, buildArgs, runProcess } from "../commands.ts"
+import { COMMAND, availableActions, buildArgs, buildUpArgs, commandLine, runProcess } from "../commands.ts"
 import { findComposeFile, normalizeProject, resolveComposeTarget } from "../compose.ts"
-import { mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
+import { describeLogsArgs, mergeLogLines, parseLogLines, runDockerLogs, sanitize } from "../logs.ts"
 import { INTERESTING_ACTIONS, createEventWatch, parseEventLine } from "../events.ts"
 import {
   ENGINE_DEADLINE_MS,
@@ -694,6 +694,35 @@ assert.equal(ENGINE_NAME, IS_LINUX ? "Docker" : "Docker Desktop", "the product n
 assert.ok(
   selectRows(busyHost, []).length <= MAX_RUNNING,
   `the sidebar shows at most ${MAX_RUNNING} unpinned running rows`,
+)
+
+// The panel prints a command beside every action and then runs a separately built argv. The two only
+// stay together if the printed string is derived from the executed one, so these assert the agreement
+// rather than the literals: a second copy of any of these would drift and take a footer down with it.
+assert.deepEqual(
+  buildArgs("up", bare, stack),
+  buildUpArgs(stack),
+  "the menu path and the stack path must produce one argv, or the confirmation prints a command it will not run",
+)
+assert.equal(
+  commandLine(COMMAND, buildUpArgs(stack)),
+  `docker compose -f ${stack.file} -p ${stack.project} up -d`,
+  "the stack footer names the binary, or the reader cannot paste it back",
+)
+assert.equal(
+  commandLine(COMMAND, describeLogsArgs("worker-old")),
+  "docker logs --timestamps --tail 200 -- worker-old",
+  "the logs footer is the argv runDockerLogs executes, timestamps included",
+)
+assert.equal(
+  describeLogsArgs("worker-old").includes("--timestamps"),
+  true,
+  "the footer's hand-written copy had already lost this flag, which is what parseLogLines splits on",
+)
+assert.equal(
+  commandLine("docker", []),
+  "docker",
+  "an empty argv still names the binary, so the helper never has to be special-cased by its callers",
 )
 
 const live = await runDockerPs()

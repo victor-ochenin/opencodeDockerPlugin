@@ -1,6 +1,6 @@
 import { userInfo } from "node:os"
 
-import { runProcess, type CommandResult } from "./commands.ts"
+import { commandLine, runProcess, type CommandResult } from "./commands.ts"
 
 /**
  * The Desktop backend owns the named pipe `dockerDesktopLinuxEngine`, and the CLI plugin spends
@@ -171,7 +171,7 @@ export function buildRuntimeCommand(action: RuntimeAction): RuntimeCommand {
  */
 export function describeRuntimeCommand(action: RuntimeAction): string {
   const { bin, args } = buildRuntimeCommand(action)
-  return [bin, ...args].join(" ")
+  return commandLine(bin, args)
 }
 
 export const ENGINE_ACTION_LABEL: Record<RuntimeAction, string> = {

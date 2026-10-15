@@ -1,6 +1,6 @@
 {
   "name": "opencode-docker-panel",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Docker container panel for the OpenCode 2 TUI sidebar",
   "keywords": [
     "opencode",

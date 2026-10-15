@@ -62,11 +62,20 @@ export function mergeLogLines(parts: string[]): LogLine[] {
   return lines.sort((a, b) => (a.time || "￿").localeCompare(b.time || "￿")).slice(-TAIL)
 }
 
+/**
+ * The argv for a container's logs, exported because the panel prints it as the footer of the Logs
+ * action. A hand-written copy of it had already drifted by losing the timestamps flag, which is the
+ * difference between raw output and the output this module parses.
+ */
+export function describeLogsArgs(name: string): readonly string[] {
+  return ["logs", "--timestamps", "--tail", String(TAIL), "--", name]
+}
+
 export function runDockerLogs(name: string, timeoutMs: number = TIMEOUT_MS): Promise<LogResult> {
   return new Promise((resolve) => {
     execFile(
       COMMAND,
-      ["logs", "--timestamps", "--tail", String(TAIL), "--", name],
+      [...describeLogsArgs(name)],
       { timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER },
       (error, stdout, stderr) => {
         if (!error) {

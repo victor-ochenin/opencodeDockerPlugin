@@ -3,9 +3,20 @@ import { execFile } from "node:child_process"
 import type { ComposeTarget } from "./compose.ts"
 import type { Container, ContainerAction } from "./types.ts"
 
-const COMMAND = "docker"
+/** Exported because the panel prints a command line and a printed line has to name the binary it will run */
+export const COMMAND = "docker"
 const TIMEOUT_MS = 60000
 const MAX_BUFFER = 1024 * 1024
+
+/**
+ * A command as a reader sees it, binary included.
+ *
+ * The panel prints this beside every action, and a printed line that lost the binary is a line that
+ * cannot be pasted back into a shell to be run by hand.
+ */
+export function commandLine(bin: string, args: readonly string[]): string {
+  return [bin, ...args].join(" ")
+}
 
 export const ACTION_LABEL: Record<ContainerAction, string> = {
   start: "Start",
@@ -15,13 +26,23 @@ export const ACTION_LABEL: Record<ContainerAction, string> = {
   down: "Down compose project",
 }
 
+/**
+ * `up` acts on a project rather than on a container: nothing stands behind it to name, which is why
+ * this takes the resolved target alone and `buildArgs` only delegates here. The panel reaches the
+ * same builder from the header, where there is no container at all.
+ *
+ * Both flags are explicit because the project's `name:` can be templated or overridden by the
+ * environment, and this way `up` acts on the project the panel is already showing.
+ */
+export function buildUpArgs(target: ComposeTarget): string[] {
+  return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
+}
+
 /** The name goes after `--` because a container name may start with a dash and docker reads it as a flag */
 export function buildArgs(action: ContainerAction, container: Container, target?: ComposeTarget | null): string[] {
   if (action === "up") {
     if (!target) throw new Error(`container ${container.name} has no resolved compose target`)
-    // Both flags are explicit because the project's `name:` can be templated or overridden by the
-    // environment, and this way `up` acts on the project the panel is already showing
-    return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
+    return buildUpArgs(target)
   }
   if (action === "down") {
     const project = container.composeProject

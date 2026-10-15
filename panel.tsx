@@ -2,9 +2,18 @@ import { Index, Show, createEffect, createSignal, onCleanup } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 
-import { ACTION_LABEL, availableActions, buildArgs, runDockerArgs, runProcess } from "./commands.ts"
+import {
+  ACTION_LABEL,
+  COMMAND,
+  availableActions,
+  buildArgs,
+  buildUpArgs,
+  commandLine,
+  runDockerArgs,
+  runProcess,
+} from "./commands.ts"
 import { findComposeFile, type ComposeTarget } from "./compose.ts"
-import { runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
+import { describeLogsArgs, runDockerLogs, type LogLevel, type LogResult } from "./logs.ts"
 import { createDockerPolling, createEngineProbe, selectRows } from "./poll.ts"
 import {
   ENGINE_ACTION_LABEL,
@@ -18,11 +27,6 @@ import type { Container, ContainerAction } from "./types.ts"
 
 const LOG_VIEW_LINES = 15
 const LOG_REFRESH_MS = 2000
-
-/** One source for the argv, so the menu footer and the run cannot drift apart */
-function stackArgs(target: ComposeTarget): string[] {
-  return ["compose", "-f", target.file, "-p", target.project, "up", "-d"]
-}
 
 type MenuChoice = ContainerAction | "logs" | "pin"
 
@@ -67,7 +71,7 @@ function LogsView(props: {
 
   return (
     <box flexDirection="column">
-      <text fg={props.theme.text.muted}> docker logs --tail 200 -- {props.name} </text>
+      <text fg={props.theme.text.muted}> {commandLine(COMMAND, describeLogsArgs(props.name))} </text>
       <Show when={props.result?.error}>
         <text fg={props.theme.text.feedback.error.base}> {props.result?.error ?? ""}</text>
       </Show>
@@ -338,11 +342,11 @@ export function DockerPanel(props: {
     if (!stack) return
     const confirmed = await props.ui.dialog.confirm({
       title: `Up ${stack.project}?`,
-      message: `Starts every service of this compose project from ${stack.file}:\n\n${stackArgs(stack).join(" ")}`,
+      message: `Starts every service of this compose project from ${stack.file}:\n\n${commandLine(COMMAND, buildUpArgs(stack))}`,
       label: { confirm: "Up stack", cancel: "Cancel" },
     })
     if (!confirmed) return
-    await run("up", stack.project, stackArgs(stack))
+    await run("up", stack.project, buildUpArgs(stack))
   }
 
   const openMenu = async (container: Container) => {
@@ -360,13 +364,13 @@ export function DockerPanel(props: {
             : item === "up"
               ? `starts every service of ${stack?.project} from the agent directory`
               : container.status,
-        footer: buildArgs(item, container, stack).join(" "),
+        footer: commandLine(COMMAND, buildArgs(item, container, stack)),
       })),
       {
         title: "Logs",
         value: "logs" as MenuChoice,
         description: "read the last 200 log lines in the sidebar",
-        footer: `docker logs --tail 200 -- ${container.name}`,
+        footer: commandLine(COMMAND, describeLogsArgs(container.name)),
       },
       {
         title: isPinned ? "Unpin" : "Pin",
@@ -420,6 +424,7 @@ export function DockerPanel(props: {
     setTimeout(() => void open(), 0)
   }
 
+  // The rows go while stopping because the containers behind them are about to die with the engine
   const visible = () => (stopping() ? [] : selectRows(polling.state().containers, props.pinned))
   const hasRows = () => visible().length > 0
   const hidden = () => Math.max(0, polling.state().containers.length - visible().length)
@@ -430,6 +435,7 @@ export function DockerPanel(props: {
       ? `${hidden()} more, click for all`
       : `${polling.state().containers.length} container${polling.state().containers.length === 1 ? "" : "s"}, click for all`
 
+  // One click does two things, and which one is decided by whether there is anything to show
   const pressHeader = () => {
     if (hasRows()) {
       setOpen((value) => !value)
@@ -454,25 +460,23 @@ export function DockerPanel(props: {
           <text fg={theme().text.muted}> working</text>
         </Show>
       </box>
-
+      // Every container is stopped or crowded out of the row limit, so this line is the only way to reach them
       <Show when={!stopping() && !hasRows() && polling.state().containers.length > 0}>
         <text fg={theme().text.muted} onMouseUp={(event) => arm(openBrowse, event)}>
           {" "}
           click for the list
         </text>
       </Show>
-
       <Show when={engineDown() && !busy()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void runRuntime("engine-start"), event)}>
           <b>Start {ENGINE_NAME}</b>
           <span style={{ fg: theme().text.muted }}> · click to start</span>
         </text>
       </Show>
-
+      // The engine is up and nothing is running, which is the only case where a detail is worth a line of its own
       <Show when={!engineDown() && polling.state().containers.length === 0 && polling.state().detail.length > 0}>
         <text fg={theme().text.muted}> {polling.state().detail}</text>
       </Show>
-
       <Show when={polling.state().containers.length > 0 && open()}>
         <Index each={visible()}>
           {(container) => (
@@ -494,7 +498,7 @@ export function DockerPanel(props: {
           </text>
         </Show>
       </Show>
-
+      // No engine means no daemon to build with, and stopping means the project is already on its way down
       <Show when={pendingStack() && !engineDown() && !stopping()}>
         <text fg={theme().text.base} onMouseUp={(event) => arm(() => void openStack(), event)}>
           <b>Up stack</b>

@@ -3,6 +3,20 @@
 All notable changes to this plugin, by version and date. The version is the one in `package.json` at
 that commit.
 
+## 0.7.1 - 2026-10-15
+
+- Every command the panel prints beside an action now names the binary it runs. The engine line read
+  `-n systemctl stop docker.service docker.socket` on Linux and `desktop stop` on Windows, neither of
+  which can be pasted into a shell, and the container menu footer dropped the binary for every action
+- The Logs footer and the caption over the log window each named a command other than the one the
+  sidebar runs. Both were written by hand and had already lost `--timestamps`, the flag `parseLogLines`
+  splits on, so following them produced output the panel cannot parse
+- The `up` argument list was built in two places. The copy in the panel existed because `buildArgs`
+  asks for a container that a compose stack has none of, so there is one builder now and the panel
+  prints the argv it hands to docker
+- The sudoers hint refuses a name that is not a name. The hint is a command the reader pastes into a
+  shell running as root, and a name carrying a quote would turn that line into a different command
+
 ## 0.7.0 - 2026-10-11
 
 - The panel works on Linux. The engine there is the `docker.service` systemd unit rather than a
